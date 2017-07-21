@@ -153,4 +153,63 @@ namespace ctl {
 		}
 	}
 
+	/****************************************************************************
+	Point Location Algorithms
+	****************************************************************************/
+
+	const double EPSILON = 10-6;
+
+	bool UpdateCount(const Vector& point, PointList &ring, int& Rcross, int& Lcross)
+	{
+		for (int i = 1; i < ring.size(); i++)
+		{
+			Point p1 = ring.at(i-1);
+			Point p2 = ring.at(i);
+
+			if (point == p1) 
+				return true;
+
+			double	height = point.y;
+			double	x;
+			double	Rstrad;
+			double	Lstrad;
+
+            //Rstrad is false if the point only touches ray, but is mostly below it				
+            //Lstrad is false if the point only touches ray, but is mostly above it
+            Rstrad = ( p2.y > height - EPSILON ) != ( p1.y > height - EPSILON );				
+            Lstrad = ( p2.y < height + EPSILON ) != ( p1.y < height + EPSILON );
+
+            if (Rstrad || Lstrad)
+            {
+                x = ( (p2.x-point.x)*(p1.y-height) - (p1.x-point.x)*(p2.y-height) ) 
+	                / ( p1.y - p2.y );
+                if ( Rstrad && x > EPSILON ) 
+					Rcross++;
+                if ( Lstrad && x < -EPSILON ) 
+					Lcross++;
+				if (abs(x) < EPSILON)
+					return true;
+            }
+		}
+		return false;
+	}
+
+	bool PointInRing(const Vector& point, PointList &ring)
+	{
+		int Rcross = 0;
+		int Lcross = 0;
+
+		if (UpdateCount(point,ring,Rcross,Lcross)) 
+			return true;
+
+		//check cross countings to determine intersection
+        if ( (Rcross % 2) != (Lcross % 2) )
+			return true;
+        else if ( (Rcross % 2) == 1 )
+			return true;
+		else
+			return false;
+	}
+
+
 }

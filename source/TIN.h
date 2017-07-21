@@ -77,4 +77,7 @@ namespace ctl {
 
 	};
 
+	bool PointInRing(const Vector& point, PointList &ring);
+	bool UpdateCount(const Vector& point, PointList &ring, int& Rcross, int& Lcross);
+
 }
