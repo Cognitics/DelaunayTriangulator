@@ -277,7 +277,7 @@ namespace ctl {
 	\sa Graphics Gems IV (Paul S. Heckbert 1994)
 	\sa Guibas and Stolfi (1985)
  */
-	class CNERGY_CORE_API DelaunayTriangulation 
+	class DelaunayTriangulation 
 	{
 	public:
 
