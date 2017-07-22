@@ -21,6 +21,8 @@ THE SOFTWARE.
 ****************************************************************************/
 #include "Vertex.h"
 
+#include <cstddef>
+
 namespace ctl {
 
 	ID Vertex::getID(void)

@@ -21,6 +21,7 @@ THE SOFTWARE.
 ****************************************************************************/
 #pragma once
 
+#include <stdlib.h>
 #include "Edge.h"
 #include <vector>
 
@@ -36,7 +37,11 @@ namespace ctl {
 
 
 	public:
-		Block(size_t num) { data = new T[size = num]; }
+	  Block(size_t num)
+	    {
+	      size = num;
+	      data = new T[size];
+	    }
 		~Block(void) { delete [] data; }
 
 		size_t	size;

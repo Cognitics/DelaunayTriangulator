@@ -57,12 +57,12 @@ namespace ctl {
 
 	unsigned int IDGenerator::numUsedIDs(void) const
 	{
-		return AvailableIDs.front() - unsigned int(AvailableIDs.size()) + 1;
+	  return AvailableIDs.front() - ((unsigned int)AvailableIDs.size()) + 1;
 	}
 
 	unsigned int IDGenerator::numFreeIDs(void) const
 	{
-		return unsigned int(AvailableIDs.size()) - 1;
+	  return (unsigned int)(AvailableIDs.size()) - 1;
 	}
 
 	unsigned int IDGenerator::peekNextID(void)
