@@ -1,6 +1,9 @@
 # DelaunayTriangulator
 Provides a Dynamically Constrained Delaunay Triangulation system. Based on an incrimental Delaunay Triangulation algorithm with the added feature of constraint insertion and removal. Capable of creating a point only Delaunay Triangulation in O(n^4/3) time ( provided the points are inserted randomly - worst case time is n^2 and is encounted when inserting points of a grid in order, to counter this worst case behaviour an even faster algorithm for generating DelaunayTringulations from a grid is provided).
 
+## License
+The Delaunay Triangulator is provided under the [MIT License](#license-text)
+
 ## DelaunayTriangulation Construction:
 When creating a DelaunayTriangulation a few options must be specified.
 
@@ -9,7 +12,7 @@ When creating a DelaunayTriangulation a few options must be specified.
 |BoundingRegion|A DelaunayTriangulation must be initially constrainted to some bounding region (in this implementation a quad).<ul><li>This must be specified by the user upon construction.</li><li>The user can specify 4 points of a bounding QUAD upon construction.</li><li>The user can specify a CGrid (which contains a bounding QUAD) upon construction.</li><li>Defaults to (NO DEFAULT - MUST BE SPECIFIED).</li><li>Must be counter-clockwise in orientation.</li></ul>|
 |DataBlockSize|The DelaunayTriangulation needs to know how large to make new Vertex and Edge data blocks if more Edges or Verts are needed.<br>This value will set the size (as in number of Edges or Verts to a block, not the number of bytes) per block. A larger size per block will result in fewer blocks overall and thus less time spent on memory management, while a smaller block size will result in less unused allocated memory at any given time, but result in longer processing times since more blocks must be managed.<br>**Default to (100)**
 |Epsilon|A custom epsilon can be defined for comparisons in this DelaunayTriangulation. If the epsilon is set too small, some rounding errors can lead to crashes or infinite loops. The default has been tested to work for a large number of cases. If undesired results are present, try increasing the epsilon slightly.<br>**Default to (3e-13)**|
-|MaxEdgeFlips|The maximum number of Edge flips that will be performed for any call to FlipEdges by the DelaunayTriangulation.  						This is important because a Constrained Delaunay Triangulation is not garunteed to be Delaunay since many Edges are restricted from Edge flips and no extra Vertices (other than intersection points) are created. With this in mind it is possible for the EdgeFlips to ripple outward from a new constraint for many itterations (which get increasingly worse with a DelaunayTriangulation with many Edges). To avoid this, MaxEdgeFlips is specified which will constrain the number of flips the DelaunayTriangulation will use in an attempt to correct the triangulation after inserting a new constraint. <br>**Defaults to (10000)**|
+|MaxEdgeFlips|The maximum number of Edge flips that will be performed for any call to FlipEdges by the DelaunayTriangulation. This is important because a Constrained Delaunay Triangulation is not garunteed to be Delaunay since many Edges are restricted from Edge flips and no extra Vertices (other than intersection points) are created. With this in mind it is possible for the EdgeFlips to ripple outward from a new constraint for many itterations (which get increasingly worse with a DelaunayTriangulation with many Edges). To avoid this, MaxEdgeFlips is specified which will constrain the number of flips the DelaunayTriangulation will use in an attempt to correct the triangulation after inserting a new constraint. <br>**Defaults to (10000)**|
 |Options|Additional Options may be specified or enabled for this DelaunayTriangulation (several options may be &#124; together). The Options allowed are:<table><tbody><tr><td>CLIPPING	</td><td>When Enabled, if a portion of a constraint lies outside of the bounding region, the DelaunayTriangulation will first try clipping the constraint to see if any portion is inside the DelaunayTriangulation. When Disabled, if ANY portion of the constraint is outside of the bouning region, the entire constraint will be ignored.</td></tr><tr><td>FLATTENING</td><td>When Enabled, all Z values of points added to this Triangulation will become 0.</td></tr><tr><td>INTERPOLATE_EDGES</td><td>When Enabled, any intersecting constrained Edges will create a new point with a Z value intepolated by the currently inserted Edge.</td></tr><tr><td>INTERPOLATE_FACES</td><td>When Enabled, any Point inserted into a face, will have its Z value adjusted to match the face.</td></tr></tbody></table>|
 
 ## Constraints:
@@ -103,4 +106,26 @@ A DelaunayTriangualtion cannot be copied or assigned due to the delicate data st
 //	Finished using DelaunayTriangulation
 	delete DT;	//	If the link still exists, it will be removed now
 	delete DT_2;
-	```
+```
+
+## License Text
+
+**Copyright 2017, Cognitics Inc.**
+
+Permission is hereby granted, free of charge, to any person obtaining a copy 
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights 
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell 
+copies of the Software, and to permit persons to whom the Software is 
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in 
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR 
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL 
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER 
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN 
+THE SOFTWARE.
