@@ -1,5 +1,5 @@
 # DelaunayTriangulator
-Provides a Dynamically Constrained Delaunay Triangulation system. Based on an incremental Delaunay Triangulation algorithm with the added feature of constraint insertion and removal. Capable of creating a point only Delaunay Triangulation in O(n^4/3) time ( provided the points are inserted randomly - worst case time is n^2 and is encounted when inserting points of a grid in order, to counter this worst case behaviour an even faster algorithm for generating DelaunayTringulations from a grid is provided).
+Provides a Dynamically Constrained Delaunay Triangulation system. Based on an incremental Delaunay Triangulation algorithm with the added feature of constraint insertion and removal. Capable of creating a point only Delaunay Triangulation in O(n<sup>4/3</sup>) time ( provided the points are inserted randomly - worst case time is n<sup>2</sup> and is encounted when inserting points of a grid in order, to counter this worst case behaviour an even faster algorithm for generating DelaunayTringulations from a grid is provided).
 
 ## License
 The Delaunay Triangulator is provided under the [MIT License](#license-text)
