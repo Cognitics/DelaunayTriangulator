@@ -46,6 +46,7 @@ THE SOFTWARE.
 #include "TIN.h"
 #include "DelaunayTriangulation.h"
 #include "CGrid.h"
+#include "Util.h"
 
 //!	\namespace ctl Cognitics Triangualtion Library
 namespace ctl { }

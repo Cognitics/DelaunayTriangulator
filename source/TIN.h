@@ -67,17 +67,11 @@ namespace ctl {
 
 		TIN(DelaunayTriangulation* DT);
 
-		TIN(DelaunayTriangulation* DT, std::vector<Edge*> triangle_edges);
+		TIN(DelaunayTriangulation* DT, const std::vector<Edge*> &triangle_edges);
 
 		~TIN(void) { }
-
-	private:
-
-		void CreateFromDT(DelaunayTriangulation* DT, std::vector<Edge*> triangle_edges);
+		void CreateFromDT(DelaunayTriangulation* DT, const std::vector<Edge*> &triangle_edges);
 
 	};
-
-	bool PointInRing(const Vector& point, PointList &ring);
-	bool UpdateCount(const Vector& point, PointList &ring, int& Rcross, int& Lcross);
 
 }

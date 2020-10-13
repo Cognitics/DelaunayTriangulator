@@ -116,7 +116,7 @@ namespace ctl {
 /******************************************************************************************************
 	POLYGON OPERATIONS
 *******************************************************************************************************/
-	bool PointInPolygon(Point p, PointList polygon, double epsilon)
+	bool PointInPolygon(const Point &p, const PointList &polygon, double epsilon)
 	{
 		int Rcross = 0;
 		int Lcross = 0;
@@ -155,7 +155,7 @@ namespace ctl {
         else									return false;
 	}
 
-	PointList ClipToLine(PointList polygon, Point a, Point b, double epsilon)
+	PointList ClipToLine(const PointList &polygon, Point a, Point b, double epsilon)
 	{
 		PointList result;
 		if(polygon.size() < 3) return result;
@@ -196,7 +196,7 @@ namespace ctl {
 		return result;
 	}
 
-	PointList ClipToPolygon(PointList polygon, PointList convex_region, double epsilon)
+	PointList ClipToPolygon(PointList polygon, const PointList &convex_region, double epsilon)
 	{
 		for (int i = 1; i < int(convex_region.size()); i++)
 			polygon = ClipToLine(polygon,convex_region[i-1],convex_region[i],epsilon);
