@@ -55,8 +55,8 @@ namespace ctl {
 /******************************************************************************************************
 	POLYGON OPERATIONS
 *******************************************************************************************************/
-	bool	PointInPolygon(Point p, PointList polygon, double epsilon = 1e-10);
-	PointList ClipToLine(PointList polygon, Point a, Point b, double epsilon);
+	bool	PointInPolygon(const Point &p, const PointList &polygon, double epsilon = 1e-10);
+	PointList ClipToLine(const PointList &polygon, Point a, Point b, double epsilon);
 
 /*
 	This implementation actually supports clipping any polygon - convex or concave (so long as its simple...and in fact it might even work for non-
@@ -73,7 +73,7 @@ namespace ctl {
 	Mathematically, since the convex_region is convex, that means that the funcation will always return nothing (empty vector). Its possible to prove this
 	mathematically and is actually the basis for many point in convex polygon detection systems.
 */
-	PointList ClipToPolygon(PointList polygon, PointList convex_region, double epsilon);
+	PointList ClipToPolygon(PointList polygon, const PointList &convex_region, double epsilon);
 
 	double PArea2D(const PointList& contour);
 	double PArea3D(const PointList& contour);
