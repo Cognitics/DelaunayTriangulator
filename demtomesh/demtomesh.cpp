@@ -6,13 +6,18 @@
 #include "ctl/Vector.h"
 #include "ccl/gdal.h"
 #include "elev/SimpleDEMReader.h"
+#include "ctl/DelaunayTriangulation.h"
+#include "ctl/TIN.h"
 #include <cassert>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
+#undef min
 
 
 
 using namespace cognitics::cdb;
+
 
 //! \brief A polygon with coordinates relative to the tile grid
 class TilePolygon
@@ -48,7 +53,99 @@ class TilePolygon
 };
 
 
-/*
+/*! \brief Saves triangulation results to a file
+
+    First the caller will add all the vertices using AddVertex(). Each order gets an index
+
+    Derived classes implement the AddPolygon(), AddVertex() and AddTriangle() methods
+    AddPolygon() is optional
+*/
+
+class MeshWriter
+{
+public:
+    virtual ~MeshWriter() {}
+    virtual bool AddVertex(const ctl::Point& p) = 0;
+    virtual bool AddFacet(int index1, int index2, int index3) = 0;
+    virtual bool AddPolygon(const ctl::PointList& polygon) { return true; }
+    virtual bool Close() { return true; }
+};
+
+//! \brief Writer that generates a simple .obj mesh file
+class ObjMeshWriter : public MeshWriter
+{
+    std::string _fileName;
+    std::ofstream _fd;
+    int _vertexCount = 0;
+public:
+    ObjMeshWriter(const std::string& fileName) : _fileName(fileName)
+    {
+    }
+    ~ObjMeshWriter()
+    {
+        Discard();
+    }
+
+//! \brief Closes the file and deletes it so that it is not left around
+    void Discard()
+    {
+        Close();
+    }
+    bool Open()
+    {
+        if (!_fd.is_open())
+        {
+            _fd.open(_fileName, std::ios_base::binary | std::ios_base::out | std::ios_base::trunc);
+            _fd << std::setprecision(3);
+        }
+        return _fd.is_open();
+    }
+    bool Close()
+    {
+        if (_fd.is_open())
+            _fd.close();
+        _vertexCount = 0;
+        return true;
+    }
+    bool AddVertex(const ctl::Point& p)
+    {
+        if (!Open())
+            return false;
+        // We save the geometric coordinates only
+        char str[200];
+        double r = 0, g = 0, b = 0;
+        if (p.z <= 0)
+            b = 1.0;
+        else
+            r = p.z/300;
+        sprintf_s(str, "v %.3f %.3f %.3f %.3f %.3f %.3f\n", p.x, p.y, p.z, r, g, b);
+    
+//        _fd << "v " << p.x << " " << p.y << " " << p.z "\n";
+        _fd << str;
+        ++_vertexCount;
+        return true;
+    }
+
+    virtual bool AddFacet(int index1, int index2, int index3)
+    {
+        if (!Open())
+            return false;
+        if (index1 < 0 || index1 >= _vertexCount ||
+            index2 < 0 || index2 >= _vertexCount ||
+            index3 < 0 || index3 >= _vertexCount)
+                return false;
+        // Note that OBJ indexes start at 1
+        _fd << "f " << index1+1 << " " << index2+1 << " " << index3+1 << "\n";
+        return true;
+    }
+}; // ObjMeshWriter
+
+int badFUnction() {
+    return true;
+}
+
+
+/*!
     \brief Generates the mesh for a CDB tile.
 
     This implementation assumes that the DEM files are aligned with the tile.
@@ -76,8 +173,8 @@ class DEMesher
     }
 
 
-    //! \brief The quantized elevations are given in cm, and the low 8 bits 
-    //         are set to zero
+ //! \brief The quantized elevations are given in cm, and the low 8 bits 
+ //         contain the flags POINT_xxx
     static int ElevToInteger(double elevation)
     {
         return ((int)(elevation * 100)) <<8;
@@ -85,12 +182,12 @@ class DEMesher
 
     static double IntegerToElevation(int elevation)
     {
-        return 100.0 * (double)(elevation >> 8);
+        return (double)(elevation >> 8)/100.0;
     }
 
-    //! \brief Quantized elevation flags
-    // To facilitate the traversal of the elevation array we need to include 
-    // information about what is in each data point
+ //! \brief Quantized elevation flags
+ //      To facilitate the traversal of the elevation array we need to include 
+ //      information about what is in each data point
     enum {
         POINT_BOUNDARY = 1,  // The point is the bounday of the target area
         POINT_REMOVED = 2,   // The point was discarded, considered not relevant
@@ -101,7 +198,7 @@ class DEMesher
    
     public: 
 
-    //! \brief Creates a mesher for the tile at a certain latitude and longitude
+ //! \brief Creates a mesher for the tile at a certain latitude and longitude
     DEMesher(const std::string &cdbRoot, const Tile& t) :
           _root(cdbRoot),
           _tile(t) {}
@@ -147,7 +244,8 @@ class DEMesher
 
     void Generate(const Tile &north, const Tile &east, const Tile &northEast);
 
-    void TestSimplify();
+    void Triangulate(ctl::TIN &tr, MeshWriter *save=nullptr);
+
 private:
     void MarkBoundary();
     bool CopyGrid(elev::SimpleDEMReader &reader, int x, int y, int subsample=2);
@@ -356,6 +454,8 @@ void DEMesher::SimplifySlope(double tolerance)
         int* below = (y + 1 < _qSize) ? ptr(y + 1) : row;
         for (int x = 1; x < _qSize - 1; x++)
         {
+            // There are 8 lines that combine the center pixel with the neighbor
+            // Check if the center is aligned with any of them. There must be a better way
             if (IsInline(row[x-1],   row[x], row[x+1]) ||
                 IsInline(above[x],   row[x], below[x]) ||
                 IsInline(above[x-1], row[x], below[x+1]) ||
@@ -377,6 +477,19 @@ void DEMesher::SimplifySlope(double tolerance)
     std::cout << removed << " colinear points, " << accepted << " remaining points" << std::endl;
 }
 
+
+/*! \brief Given an array of quantized elevations, remove redundant points
+ 
+    The function computes the error which would be generated by the triangulation
+    by removing each point, and if 
+
+*/
+void SimplifyEdge(double toleranceMeters, int* firstInput)
+{
+
+}
+
+
 void DEMesher::MarkBoundary()
 {
     for (int i = 0; i < _qSize; i++)
@@ -387,30 +500,6 @@ void DEMesher::MarkBoundary()
         ptr(i)[_qSize - 1] |= POINT_BOUNDARY;
     }
 }
-
-
-
-void DEMesher::TestSimplify()
-{
-    std::vector<double> altitudes = {
-         100, 100, 100, 100, 100, 100, 100,
-         100, 100, 100, 100, 100, 200, 200,
-         100, 100, 100, 100, 200, 200, 100,
-         100, 100, 100, 200, 200, 100, 100,
-         100, 100, 100, 200, 200, 100, 100,
-         200, 200, 200, 200, 100, 100, 100,
-         200, 200, 200, 200, 100, 100, 100
-    };
-    _qSize = 7;
-    _quantized.resize(altitudes.size());
-    for (int i = 0; i < altitudes.size(); i++)
-        _quantized[i] = ElevToInteger(altitudes[i]);
-    MarkBoundary();
-    SimplifyFlat(3);
-    SaveQuantized("c:/build/temp/simplified.json");
-
-}
-
 
 void DEMesher::Generate(const Tile &north, const Tile &east, const Tile &northEast)
 {
@@ -474,6 +563,77 @@ void DEMesher::Generate(const Tile &north, const Tile &east, const Tile &northEa
     SaveQuantized("c:\\build\\temp\\quantized.json");
 }
 
+void DEMesher::Triangulate(ctl::TIN &container, MeshWriter *save)
+{
+    // The boundary rectangle is counterclockwise, but on a 'normal' (Y up) axis
+    // the best way to build it is: (xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)
+    int* top = ptr(0);
+    int* bottom = ptr(_qSize - 1);
+    ctl::PointList boundary{ 
+        ctl::Point(       -1,        -1, IntegerToElevation(top[0])),
+        ctl::Point(_qSize,        -1, IntegerToElevation(top[_qSize-1])), 
+        ctl::Point(_qSize, _qSize, IntegerToElevation(bottom[_qSize-1])), 
+        ctl::Point(-1,        _qSize, IntegerToElevation(bottom[0])) 
+    };
+
+    ctl::DelaunayTriangulation dt(boundary);
+
+    // All the points that have not been removed are constraints
+    int failedPoints = 0;
+    int insertedPoints = 0;
+    for (int y=0; y<_qSize; y++)
+        for (int x = 0; x < _qSize; x++)
+        {
+            int altitude = ptr(y)[x];
+            if ((altitude & POINT_REMOVED) == 0)
+            {
+                insertedPoints++;
+                ctl::Point target(x, y, IntegerToElevation(altitude));
+                if (dt.InsertConstrainedPoint(target) == 0)
+                    failedPoints++;
+            }
+        }
+    std::vector<ctl::Edge*> edges;
+    edges = dt.GatherTriangles(ctl::PointList());
+    container.CreateFromDT(&dt, edges);
+    if (save)
+    {
+        bool success = true;
+        auto verts = container.verts;
+
+        // Indexes of the corners. The last entry contains the last enumerated corner
+        int corners[4] = { -1,-1,-1,-1 };
+        int numPoints = 0;
+        int numCorners = 0;
+        for (auto& v : verts)
+        {
+            success = success && save->AddVertex(v);
+            if (v.x < 0 || v.x >= _qSize)
+            {
+                std::cout << "Corner: " << numPoints << " " << v.x << " " << v.y<<std::endl;
+                if (numCorners<4)
+                    corners[numCorners] = corners[3] = numPoints;
+                numCorners++;
+            }
+            numPoints++;
+        }
+        auto triangles = container.triangles;
+        auto IsCorner = [&](int index)->bool { return index<=corners[3] && (index==corners[3] || index == corners[0] || index == corners[1] || index == corners[2]); };
+        for (int i = 0; i + 2 < triangles.size(); i += 3)
+        {
+            if (!IsCorner(triangles[i]) && !IsCorner(triangles[i+1]) && !IsCorner(triangles[i+2]))
+                success = success && save->AddFacet(triangles[i+0], triangles[i+1], triangles[i+2]);
+        }
+
+        success = success && save->Close(); // Make sure the data is saved
+        if (!success)
+            std::cout << "Cannot save the mesh to file" << std::endl;
+    }
+
+}
+
+
+
 // Returns the tile at a certain coordinate, with the tiles North and West
 void FindTiles(std::vector<Tile>& tiles, const Tile& target, Tile& north, Tile& east, Tile &northEast)
 {
@@ -483,11 +643,13 @@ void FindTiles(std::vector<Tile>& tiles, const Tile& target, Tile& north, Tile& 
     Longitude eastLng = target.getCoordinates().high().longitude();
     for (auto& t : tiles)
     {
-        if (t.getCoordinates().low().latitude() == northLat && t.getCoordinates().low().longitude()==westLng)
+        auto low = t.getCoordinates().low();
+        auto high = t.getCoordinates().high();
+        if (low.latitude() == northLat && low.longitude()==westLng)
             north = t;
-        else if (t.getCoordinates().low().latitude()==southLat && t.getCoordinates().low().longitude() == eastLng)
+        else if (low.latitude()==southLat && low.longitude() == eastLng)
             east = t;
-        else if (t.getCoordinates().low().latitude()==northLat && t.getCoordinates().low().longitude() == eastLng)
+        else if (low.latitude()==northLat && low.longitude() == eastLng)
             northEast = t;
     }
 
@@ -517,6 +679,10 @@ int main(int argc, char **argv)
     FindTiles(tiles,center,north,east,northEast);
     DEMesher test(cdb,center);
     test.Generate(north,east,northEast);
+    ObjMeshWriter writer("c:/build/temp/terrainmesh.obj");
+    ctl::TIN container;
+    test.Triangulate(container, &writer);
+
 
     for (double s =89; s<=90; s+=0.1)
         for (double e = 44; e <= 48.1; e += 0.1)
