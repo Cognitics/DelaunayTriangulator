@@ -242,11 +242,10 @@ class DEMesher
 
     void Generate(const Tile &north, const Tile &east, const Tile &northEast);
 
-    void Triangulate(ctl::TIN &tr, MeshWriter *save=nullptr);
+    void Triangulate(MeshWriter *save=nullptr);
 
 private:
     void SelectBoundary(DEMesherLineSelector& processor, std::vector<int> &constraints);
-    void MarkBoundary();
     bool CopyGrid(elev::SimpleDEMReader &reader, int x, int y, int subsample=2);
     void SimplifyFlat(double  toleranceMeters);    
     void SimplifySlope(double  toleranceRatio);    
@@ -267,9 +266,6 @@ protected:
     int _n = 0;    // Number of points
     int _step = 1; // Step between points
 
-    DEMesherLineSelector(int lineSize, int step) :
-        _n(lineSize), _step(step) {}
-
  /*! \brief Implements simplification of the line
   
       The function must be thread safe
@@ -284,30 +280,28 @@ protected:
       \param constraints Array of point indexes that must be preserved
 
        \code
-         class Simplifier : public DEMesherSimplifier 
+         class Simplifier : public DEMesherLineSelector 
          {
-            void Process(int* first, std::vector<int> &constraints);
+            void Process(std::vector<int> &constraints);
          };
-         // Lines are 65 values long, the distance between them is 513 values
-         Simplifier s(65, 513);
+         Simplifier s;
 
          // Force to preserve the first two values and the last two values
          std::vector<int> constraints = {0, 1, 63, 64};
          int *firstPoint = GetFirstPoint();
-         s.SimplifyLine(firstPoint, constraints);
+         // Lines are 65 values long, the distance between them is 513 values
+         s.Select(firstPoint, 65, 513, constraints);
     \endcode
-
  */
-    virtual void Process(int* first, std::vector<int> &constraints) = 0;
+    virtual void Process(std::vector<int> &constraints) = 0;
+
+    int& Item(int x) { return _first[x*_step]; }
 
     //! \brief The points are removed by setting the POINT_REMOVED flag
     static void Remove (int &value) { value |= DEMesher::POINT_REMOVED; };      // remove from triangulation
     static void Preserve (int &value) { value &= (~DEMesher::POINT_REMOVED); }; // Marks the value to keep
     static bool Removed(int value) { return (value & DEMesher::POINT_REMOVED) != 0; }
 
-public:
-    int LineSize() const { return _n; }
-    int Step() const { return _step; }
     void Normalize(std::vector<int>& constraints)
     {
         std::sort(constraints.begin(), constraints.end());
@@ -322,23 +316,16 @@ public:
             constraints.push_back(_n-1);
     }
 
-    void SelectIn(int *line, int n, int step, std::vector<int> &constraints)
+    public:
+    void Select(int *line, int n, int step, std::vector<int> &constraints)
     {
-        if (line && _n > 2)
+        if (line && n >= 2)
         {
+            _first = line;
             _n = n;
             _step = step;
             Normalize(constraints);
-            Process(line, constraints);
-        }
-    }
-
-    void SimplifyLine(int* first, std::vector<int>& constraints)
-    {
-        if (first && _n > 2)
-        {
-            Normalize(constraints);
-            Process(first, constraints);
+            Process(constraints);
         }
     }
 };
@@ -568,7 +555,7 @@ void DEMesher::SimplifySlope(double tolerance)
 }
 
 
-/*! \brief Simplifies a line keeping the error below a limit
+/*! \brief Removes points from a line keeping the error below a limit
  
     The function checks how much error would be generated if the point was removed
     and the previous and next segments were joined. If the error is less than the
@@ -579,7 +566,7 @@ void DEMesher::SimplifySlope(double tolerance)
 */
 class LineSimplifyByError : public DEMesherLineSelector
 {
-    // Quantized tolerance, removing 8 bits
+    // Quantized tolerance, without the flag bits
     int _tolerance;
 
     // Maximum spacing between preserved points. We want to keep a few points in the
@@ -588,15 +575,12 @@ class LineSimplifyByError : public DEMesherLineSelector
     static int const ELEV_SHIFT = 8;
 
 public:
-    LineSimplifyByError(double toleranceMeters, int lineSize, int lineStep) :
-        DEMesherLineSelector(lineSize, lineStep),
+    LineSimplifyByError(double toleranceMeters) :
         _tolerance(DEMesher::ElevToQuantized(toleranceMeters)>>ELEV_SHIFT)
     {}
 
-    void Process(int* first, std::vector<int>& constraints)
+    void Process(std::vector<int>& constraints)
     {
-        auto Item = [&](int x)->int& { return first[x * _step]; }; // Address of a value
-
         int currentConstraint = 0;
         int xprev = 0, xnext = 0; // index of the previous point preserved
         int x;
@@ -650,17 +634,12 @@ class KeepSeaLevelInLine : public DEMesherLineSelector
 {
     // Maximum and minimum sea level, quantized
     int _maxLevel, _minLevel;
-    void Process(int* first, std::vector<int>& constraints)
+    void Process(std::vector<int>& constraints)
     {
         auto InRange = [&](int x)->bool
         {
-            int z = first[x * _step] >> 8;
+            int z = Item(x) >> 8;
             return (z >= _minLevel && z <= _maxLevel);
-        };
-
-        auto KeepSample = [&](int x)
-        {
-            Preserve(first[x * _step]);
         };
 
         for (int x = 1; x < _n-1; x++)
@@ -669,23 +648,32 @@ class KeepSeaLevelInLine : public DEMesherLineSelector
             {
                 if (!InRange(x+1))
                 {
-                    KeepSample(x);
-                    KeepSample(x+1);
+                    Preserve(Item(x));
+                    Preserve(Item(x+1));
 
                 }
                 if (!InRange(x-1))
                 {
-                    KeepSample(x);
-                    KeepSample(x-1);
+                    Preserve(Item(x));
+                    Preserve(Item(x-1));
                 }
             }
         }
     }
 public: 
-    KeepSeaLevelInLine(double maxLevelMeters, double minLevelMeters,  int lineSize, int lineStep) :
-        DEMesherLineSelector(lineSize, lineStep),
+    KeepSeaLevelInLine(double maxLevelMeters, double minLevelMeters) :
         _maxLevel(DEMesher::ElevToQuantized(maxLevelMeters) >> 8),
         _minLevel(DEMesher::ElevToQuantized(minLevelMeters) >> 8) {}
+};
+
+//! \brief Marks the points in a line as boundary
+class BoundaryMarker : public DEMesherLineSelector
+{
+    void Process(std::vector<int>& constraints)
+    {
+        for (int x = 0; x < _n; x++)
+            Item(x) |= DEMesher::POINT_BOUNDARY;
+    }
 };
 
 
@@ -697,9 +685,10 @@ public:
         std::vector<int> elev(values.size()*step, -10000);
         for (int i = 0; i < values.size(); i++)
             elev[i*step] = DEMesher::ElevToQuantized(values[i]) | DEMesher::POINT_BOUNDARY | DEMesher::POINT_REMOVED;
-        LineSimplifyByError obj1(10, (int)elev.size(), 1);
-        obj1.SimplifyLine(elev.data(), constraints);
+        LineSimplifyByError obj1(10);
+        obj1.Select(elev.data(), (int)elev.size(), 1, constraints);
     }
+
     TestLineSimple()
     {
         std::vector<int> empty;
@@ -725,24 +714,13 @@ public:
 
 TestLineSimple t;
 
-void DEMesher::MarkBoundary()
-{
-    for (int i = 0; i < _qSize; i++)
-    {
-        ptr(0)[i] |= POINT_BOUNDARY;
-        ptr(_qSize - 1)[i] |= POINT_BOUNDARY;
-        ptr(i)[0] |= POINT_BOUNDARY;
-        ptr(i)[_qSize - 1] |= POINT_BOUNDARY;
-    }
-}
-
 void DEMesher::SelectBoundary(DEMesherLineSelector& processor, std::vector<int> &constraints)
 {
     // Run the four corners in the standard order (minx, miny) (maxx, miny) (maxx,maxy) (minx,maxy)
-    processor.SelectIn(ptr(0),                 _qSize, 1, constraints);
-    processor.SelectIn(ptr(0)+_qSize-1,        _qSize, _qSize, constraints);
-    processor.SelectIn(ptr(_qSize-1)+_qSize-1, _qSize, -_qSize, constraints);
-    processor.SelectIn(ptr(_qSize - 1),        _qSize, -_qSize, constraints);
+    processor.Select(ptr(0),                 _qSize, 1, constraints);
+    processor.Select(ptr(0)+_qSize-1,        _qSize, _qSize, constraints);
+    processor.Select(ptr(_qSize-1)+_qSize-1, _qSize, -1, constraints);
+    processor.Select(ptr(_qSize - 1),        _qSize, -_qSize, constraints);
 }
 
 
@@ -802,40 +780,27 @@ void DEMesher::Generate(const Tile &north, const Tile &east, const Tile &northEa
             // Copy the top-right corner
             CopyGrid(reader,width,-height+1,subsample);
     }
-    MarkBoundary();
+    std::vector<int> empty;
+    
+    BoundaryMarker marker;
+    SelectBoundary(marker, empty);
+
     double tolerance = 20;
     double seaLevel = 0;
     SimplifyFlat(tolerance);
     SimplifySlope(0.2);
 
-
     // Run the mesh simplification and the sea level detail on the boundary
-    std::vector<int> empty;
-    LineSimplifyByError topSimplify(tolerance / 2, _qSize, 1);
-    KeepSeaLevelInLine topSeaLevel(seaLevel, seaLevel, _qSize, 1);
-    SelectBoundary(topSimplify, empty);
-    SelectBoundary(topSeaLevel, empty);
+    LineSimplifyByError simplify(tolerance / 2);
+    KeepSeaLevelInLine forceSeaLevel(seaLevel, seaLevel);
+    SelectBoundary(simplify, empty);
+    SelectBoundary(forceSeaLevel, empty);
 
 
     SaveQuantized("c:\\build\\temp\\quantized.json");
-    return;
-
-
-   
-    topSimplify.SimplifyLine(ptr(0), empty);
-    topSeaLevel.SimplifyLine(ptr(0), empty);
-    topSimplify.SimplifyLine(ptr(_qSize-1), empty);
-    topSeaLevel.SimplifyLine(ptr(_qSize-1), empty);
-    LineSimplifyByError leftSimplify(tolerance / 2, _qSize, _qSize);
-    KeepSeaLevelInLine  leftSeaLevel(seaLevel, seaLevel, _qSize, _qSize);
-    leftSimplify.SimplifyLine(ptr(0), empty);
-    leftSeaLevel.SimplifyLine(ptr(0), empty);
-    leftSimplify.SimplifyLine(ptr(0)+_qSize-1, empty);
-    leftSeaLevel.SimplifyLine(ptr(0)+_qSize-1, empty);
-
 }
 
-void DEMesher::Triangulate(ctl::TIN &container, MeshWriter *save)
+void DEMesher::Triangulate(MeshWriter *save)
 {
     // The boundary rectangle is counterclockwise, but on a 'normal' (Y up) axis
     // the best way to build it is: (xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)
@@ -890,7 +855,7 @@ void DEMesher::Triangulate(ctl::TIN &container, MeshWriter *save)
         }
     std::vector<ctl::Edge*> edges;
     edges = dt.GatherTriangles(ctl::PointList());
-    container.CreateFromDT(&dt, edges);
+    ctl::TIN container(&dt, edges);
     if (save)
     {
         bool success = true;
@@ -985,8 +950,7 @@ int main(int argc, char **argv)
     DEMesher test(cdb,center);
     test.Generate(north,east,northEast);
     ObjMeshWriter writer("c:/build/temp/terrainmesh.obj");
-    ctl::TIN container;
-    test.Triangulate(container, &writer);
+    test.Triangulate(&writer);
 
 
     for (double s =89; s<=90; s+=0.1)
