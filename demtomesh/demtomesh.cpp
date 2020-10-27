@@ -8,6 +8,8 @@
 #include "elev/SimpleDEMReader.h"
 #include "ctl/DelaunayTriangulation.h"
 #include "ctl/TIN.h"
+#include <scenegraph/Scene.h>
+#include <scenegraphflt/scenegraphflt.h>
 #include <cassert>
 #include <fstream>
 #include <iomanip>
@@ -17,41 +19,6 @@
 
 
 using namespace cognitics::cdb;
-
-
-//! \brief A polygon with coordinates relative to the tile grid
-class TilePolygon
-{
-	// All the points of the polygon are enclosed within this rectangle.
-	int _minx, _maxx, _miny, _maxy;
-	ctl::PointList _p; // Points in the polygon 
-
-//! \brief Defines the polygon, and convertes them relative to the tile origin
-	TilePolygon(const ctl::PointList& poly, ctl::Point tileOrigin)
-	{
-		if (!poly.size())
-		{
-			_minx = _maxx = _miny = _maxy = 0;
-			return;
-		}
-		_minx = _miny = INT_MAX;
-		_maxx = _maxy = INT_MIN;
-		_p.resize(poly.size());
-		for(int i = 1; i < poly.size(); i++)
-		{
-			_p[i] = poly[i] - tileOrigin;
-			if(_minx > _p[i].x)
-				_minx = _p[i].x;
-			if(_maxx < (int)_p[i].x)
-				_maxx = (int)_p[i].x+1;
-			if(_miny > _p[i].y)
-				_miny = _p[i].y;
-			if(_maxy < (int)_p[i].y)
-				_maxy = (int)_p[i].y+1;
-		}
-	}
-};
-
 
 /*! \brief Saves triangulation results to a file
 
@@ -219,8 +186,9 @@ protected:
 	// Return the elevation of a line point, without the flags
 	int Z(int x) { return MeshQuantizedZ(Item(x)); }
 
-	void Remove (int x)    { Item(x) |= MESHPOINT_REMOVED; };   // Rmove from triangulation
-	void Preserve (int x) { Item(x) &= (~MESHPOINT_REMOVED); }; // Marks the value to keep
+	void Remove(int x)    { Item(x) |= MESHPOINT_REMOVED; };   // Remove from triangulation
+	void Preserve(int x) { Item(x) &= (~MESHPOINT_REMOVED); }; // Marks the value to be used
+	void KeepEdge(int x) { Item(x) |= MESHPOINT_EDGE; Item(x) &= (~MESHPOINT_REMOVED); }; // Edge to be forced into the triangulation
 	bool IsRemoved(int x) { return (Item(x) & MESHPOINT_REMOVED) != 0; }
 	bool IsEdge(int x)    { return (Item(x) & MESHPOINT_EDGE) != 0; }
 
@@ -350,7 +318,7 @@ class DEMesher
 
 	void Generate(const Tile &north, const Tile &east, const Tile &northEast);
 
-	void Triangulate(MeshWriter *save=nullptr);
+	void Triangulate(scenegraph::Scene *saved);
 
 private:
 	void SelectBoundary(LineSelector& processor);
@@ -858,7 +826,17 @@ void DEMesher::Generate(const Tile &north, const Tile &east, const Tile &northEa
 	SaveQuantized("c:\\build\\temp\\quantized.json");
 }
 
-void DEMesher::Triangulate(MeshWriter *save)
+/*! \brief Saves the triangulated mesh into the scene
+
+	The points in the DEM elevation grid that are preserved make a triangle mesh. The boundary
+	of the grid is a constraint so that all the edges are included.
+
+	The mesh becomes a Face in the scene. The (X,Y) coordinates are Y pointing up, the expectation 
+	is that the scene matrix will set the right orientation.
+
+	REVISIT:: Need to figure out the texture and the UV coordinates.
+*/
+void DEMesher::Triangulate(scenegraph::Scene* scene)
 {
 	// The boundary rectangle is counterclockwise, but on a 'normal' (Y up) axis
 	// the best way to build it is: (xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)
@@ -920,36 +898,35 @@ void DEMesher::Triangulate(MeshWriter *save)
 	std::vector<ctl::Edge*> edges;
 	edges = dt.GatherTriangles(ctl::PointList());
 	ctl::TIN container(&dt, edges);
-	if (save)
+	if (scene)
 	{
+		scene->hasVertexNormals = true;
+		scene->faces.emplace_back();
+		scenegraph::Face& face = scene->faces.back();
+		face.primaryColor = scenegraph::Color(0.5f, 1.0f, 0.5f);
+		face.alternateColor = scenegraph::Color(0.5f, 1.0f, 0.5f);
+
 		bool success = true;
-		auto verts = container.verts;
+		auto &verts = container.verts;
+		auto &normals = container.normals;
 
 		// Indexes of the corners. The last entry always contains the last enumerated corner.
 		int corners[4] = { -1,-1,-1,-1 };
 		int numPoints = 0;
 		int numCorners = 0;
-		for (auto& v : verts)
+		for (int i=0; i<verts.size(); i++)
 		{
+			ctl::Point v = verts[i];
 			if (v.x < 0 || v.x >= _qSize)
 			{
-				// The corners will generate a square that covers the tile representing seal level
-				// Corner altitude just above zero so that the surface hides the mesh below
-				v.z = 0.001;
-				if (v.x < 0) v.x = 0;
-				if (v.x >= _qSize) v.x = _qSize - 1;
-				if (v.y < 0) v.y = 0;
-				if (v.y >= _qSize) v.y = _qSize - 1;
 				if (numCorners<4)
 					corners[numCorners] = corners[3] = numPoints;
 				numCorners++;
 			}
-			success = success && save->AddVertex(v);
+			face.addVert(sfa::Point(v.x, v.y, v.z));
+			face.vertexNormals.push_back(sfa::Point(normals[i].x, normals[i].y, normals[i].x));
 			numPoints++;
 		}
-		// Add the two triangles that mark the sea level
-		success = success && save->AddFacet(corners[0], corners[1], corners[2]);
-		success = success && save->AddFacet(corners[0], corners[2], corners[3]);
 
 		int numTriangles = 0;
 		auto triangles = container.triangles;
@@ -958,12 +935,36 @@ void DEMesher::Triangulate(MeshWriter *save)
 		{
 			if (!IsCorner(triangles[i]) && !IsCorner(triangles[i+1]) && !IsCorner(triangles[i+2]))
 			{
-				success = success && save->AddFacet(triangles[i+0], triangles[i+1], triangles[i+2]);
+				success = success && face.AddFacet(triangles[i+0], triangles[i+1], triangles[i+2]);
 				++numTriangles;
 			}
 		}
 
-		success = success && save->Close(); // Make sure the data is saved
+		
+		// Add a new face with blue color that marks the sea level
+		if (numCorners >= 4)
+		{
+			scene->faces.emplace_back();
+			scenegraph::Face& seaSurface = scene->faces.back();
+			seaSurface.primaryColor = scenegraph::Color(0.3, 0.3f, 1.0f);
+			seaSurface.alternateColor = scenegraph::Color(0.3f, 0.3f, 1.0f);
+			for (int c = 0; c < 4; c++)
+			{
+				ctl::Point v = verts[corners[c]];
+				// Corner altitude just above zero so that the surface hides the mesh below
+				v.z = 0.001;
+				if (v.x < 0) v.x = 0;
+				if (v.x >= _qSize) v.x = _qSize - 1;
+				if (v.y < 0) v.y = 0;
+				if (v.y >= _qSize) v.y = _qSize - 1;
+				seaSurface.addVert(sfa::Point(v.x, v.y, v.z));
+				seaSurface.vertexNormals.push_back(sfa::Point(0, 0, 1));
+			}
+			success = success && seaSurface.AddFacet(0, 1, 2);
+			success = success && seaSurface.AddFacet(0, 2, 3);
+		}
+
+
 		if (!success)
 			std::cout << "Cannot save the mesh" << std::endl;
 		else
@@ -1019,8 +1020,10 @@ int main(int argc, char **argv)
 	FindTiles(tiles,center,north,east,northEast);
 	DEMesher test(cdb,center);
 	test.Generate(north,east,northEast);
-	ObjMeshWriter writer("c:/build/temp/terrainmesh.obj");
-	test.Triangulate(&writer);
+	std::unique_ptr<scenegraph::Scene> scene(new scenegraph::Scene());
+
+	test.Triangulate(scene.get());
+	scenegraph::buildOpenFlightFromScene("c:/build/temp/terrain.flt", scene.get());
 
 
 	for (double s =89; s<=90; s+=0.1)
@@ -1031,7 +1034,6 @@ int main(int argc, char **argv)
 			CoordinatesRange corner(e,e+0.0001,s,s+0.0001);
 			auto list = generate_tiles(corner, mesher.TargetTile().getDataset(), 3);
 			std::cout << "B: "<< list[0].getFilename() << std::endl;
-
 
 		}
 }
