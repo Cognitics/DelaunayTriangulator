@@ -139,16 +139,53 @@ enum {
 };
 
 
+/*! \brief Represents a vector or array of elevation elements
+    The structure points to a table of elevation values organized by rows. 
+	If the structure represents a vector, only the first element of each row is used
 
-/*! \brief Generic interface to tweak the selected points in a line of quantized elevations
-	The line is defined by its length and the increment between values, so it can
-	handle lines which are not contiguous in the array
+*/
+class QuantizedElevation
+{
+protected:
+	int *_data = nullptr; // Pointer to the first quantized array
+	int _n = 0;    // Number of rows
+	int _step = 1; // Step between rows, could be negative. If it is an array, this is the number of columns
 
+public:
+	int rows() { return _n; }
+	int cols() { return _step >= 0 ? _step : -_step; }
+
+	int* ptr(int y, int x=0) 
+	{
+		if (y < 0 || y >= rows() || x<0 || x >= cols())
+			return nullptr;
+		return _data + y * _step + x;
+	}
+
+	// A few simple macros to manipulate the quantized elevations
+	// Reference to an entry
+	int& at(int y, int x=0) { return ptr(y,x)[0]; }
+
+
+	// Return the elevation of a line point, without the flags
+	int Z(int y, int x=0) { return MeshQuantizedZ(at(y,x)); }
+
+	void Remove(int y, int x=0)    { at(y,x) |= MESHPOINT_REMOVED; };   // Remove from triangulation
+	void Preserve(int y, int x=0) { at(y,x) &= (~MESHPOINT_REMOVED); }; // Marks the value to be used
+	void KeepEdge(int y, int x=0) { at(y,x) |= MESHPOINT_EDGE; at(y,x) &= (~MESHPOINT_REMOVED); }; // Edge to be forced into the triangulation
+	bool IsRemoved(int y, int x=0) { return (at(y,x) & MESHPOINT_REMOVED) != 0; }
+	bool IsEdge(int y, int x=0)    { return (at(y,x) & MESHPOINT_EDGE) != 0; }
+};
+
+
+
+/*! \brief Generic interface to tweak the selected points in quantized elevations
+	
 Derived classes implement the Process() method that carry out the processing. The intention is
-that the should only remove some dots from the triangulation, or preserve them.
+that the should only remove some elements from the triangulation, or preserve them.
 
 \code
-		class Simplifier : public DEMesher::LineSelector 
+		class Simplifier : public DEMesher::GridSelector 
 		{
 		void Process();
 		};
@@ -164,14 +201,10 @@ that the should only remove some dots from the triangulation, or preserve them.
 		s.Select(firstPoint, 65, 513);
 \endcode
 */
-class LineSelector
+class GridSelector : public QuantizedElevation
 {
 protected:
-	int *_first = nullptr; // Pointer to the first quantized point
-	int _n = 0;    // Number of points
-	int _step = 1; // Step between points
-
-	virtual ~LineSelector() {}
+	virtual ~GridSelector() {}
 
 /*! \brief Implements simplification of the line
 
@@ -179,67 +212,18 @@ protected:
 */
 	virtual void Process() = 0;
 
-	// A few simple macros to manipulate the quantized elevations
-	// Reference to an entry
-	int& Item(int x) { return _first[x*_step]; }
-
-	// Return the elevation of a line point, without the flags
-	int Z(int x) { return MeshQuantizedZ(Item(x)); }
-
-	void Remove(int x)    { Item(x) |= MESHPOINT_REMOVED; };   // Remove from triangulation
-	void Preserve(int x) { Item(x) &= (~MESHPOINT_REMOVED); }; // Marks the value to be used
-	void KeepEdge(int x) { Item(x) |= MESHPOINT_EDGE; Item(x) &= (~MESHPOINT_REMOVED); }; // Edge to be forced into the triangulation
-	bool IsRemoved(int x) { return (Item(x) & MESHPOINT_REMOVED) != 0; }
-	bool IsEdge(int x)    { return (Item(x) & MESHPOINT_EDGE) != 0; }
-
 public:
 //! \brief Sends a line (defined by the start and the step interval) to a line selector
 	void Select(int* line, int n, int step)
 	{
 		if (!line || n <= 0)
 			return;
-		_first = line;
 		_n = n;
+		_data = line;
 		_step = step;
 		Process();
 	}
 };
-
-/*! \brief Generic interface that selects which vertices are to be preserved in the mesh
-
-    Derived classes implement the Process() method. When called the quantized elevation grid
-	is in the _data member
-*/
-class MeshSelector
-{
-protected:
-	// Points to the quantized elevation grid
-	int* _data = nullptr;
-	int _qSize = 0;
-
-	int* ptr(int y)
-	{
-		if (y <= 0)
-			return _data;
-		if (y >= _qSize) 
-			y = _qSize - 1;
-		return _data + y * _qSize;
-	}
-	
-	virtual ~MeshSelector() {}
-	virtual void Process() = 0;
-public:
-	void Select(int* grid, int gridSize)
-	{
-		if (grid && gridSize >= 2)
-		{
-			_data = grid;
-			_qSize = gridSize;
-			Process();
-		}
-	}
-}; // MeshSelector
-
 
 /*!
 	\brief Generates the mesh for a CDB tile.
@@ -321,7 +305,7 @@ class DEMesher
 	void Triangulate(scenegraph::Scene *saved);
 
 private:
-	void SelectBoundary(LineSelector& processor);
+	void SelectBoundary(GridSelector& processor);
 	bool CopyGrid(elev::SimpleDEMReader &reader, int x, int y, int subsample=2);
 	void SaveQuantized(const char* fileName);
 };
@@ -407,7 +391,7 @@ bool DEMesher::CopyGrid(elev::SimpleDEMReader &reader, int x, int y, int subsamp
 		mark as edge
 	   -pop next point from stack
 */
-class SimplifyFlat : public MeshSelector
+class SimplifyFlat : public GridSelector
 {
 public:
 	SimplifyFlat(double toleranceMeters) :
@@ -420,8 +404,10 @@ private:
 	void Process()
 	{
 		int tolerance = 0; // Quantized tolerance. It is zero when selecting points at sea level
+		if (_step <=1 || _n<=1)
+			return;
 
-		int limit = _qSize * (_qSize-1);
+		int limit = rows()*cols()-1;
 
 		// The altitude range of the current region. We need to make sure the range does 
 		// not exceed the tolerance
@@ -429,7 +415,7 @@ private:
 
 		auto CheckNeighbor = [&](int index)->bool
 		{
-			assert(index >= 0 && index < _qSize* _qSize);
+			assert(index >= 0 && index < rows() * cols());
 			int altitude = MeshQuantizedZ(_data[index]);
 			if (altitude == 0 && tolerance != 0)
 				return false;
@@ -461,7 +447,7 @@ private:
 		int edges = 0;
 
 		// Check all the point, skipping the first and last rows because they are boundaries
-		for (int testIndex = _qSize; testIndex < limit; testIndex++)
+		for (int testIndex = cols(); testIndex < limit; testIndex++)
 		{
 			int v = _data[testIndex];
 			if (v & (MESHPOINT_BOUNDARY | MESHPOINT_REMOVED | MESHPOINT_EDGE))
@@ -483,9 +469,9 @@ private:
 					inRange++;
 				if (CheckNeighbor(idx - 1))  // Left neighbor
 					inRange++;
-				if (CheckNeighbor(idx + _qSize)) // Below neighbor
+				if (CheckNeighbor(idx + _step)) // Below neighbor
 					inRange++;
-				if (CheckNeighbor(idx - _qSize)) // Above neighbor
+				if (CheckNeighbor(idx - _step)) // Above neighbor
 					inRange++;
 				if (inRange == 4)
 				{
@@ -505,7 +491,7 @@ private:
 
 /*! \brief Removes points which are approximately colinear with their neighbors
 */
-class SimplifySlope : public MeshSelector
+class SimplifySlope : public GridSelector
 {
 public:
 	SimplifySlope(double toleranceRatio) :
@@ -517,6 +503,8 @@ private:
 	void Process()
 	{
 		double tolerance = _tolerance;
+		if (_n <= 1 || _step <= 1)
+			return;
 		auto IsInline = [tolerance](int e1, int e2, int e3)
 		{
 			if ((e1 | e2 | e3) & MESHPOINT_REMOVED)
@@ -538,12 +526,12 @@ private:
 		};
 		int removed = 0;
 		int accepted = 0;
-		for (int y = 1; y < _qSize-1; y++)
+		for (int y = 1; y < rows()-1; y++)
 		{
 			int* row = ptr(y);
 			int* above = ptr(y - 1);
 			int* below = ptr(y + 1);
-			for (int x = 1; x < _qSize - 1; x++)
+			for (int x = 1; x < cols() - 1; x++)
 			{
 				// There are 8 lines that combine the center pixel with the neighbor
 				// Check if the center is aligned with any of them. There must be a better way
@@ -582,7 +570,7 @@ private:
 	Points which are marked as MESHPOING_EDGE are always preserved, points 
 	marked as MESHPOINT_REMOVE are always removed.
 */
-class LineSimplifyByError : public LineSelector
+class LineSimplifyByError : public GridSelector
 {
 	// Error allowed in the approximation
 	double _toleranceMeters = 0;
@@ -620,12 +608,20 @@ public:
 		{
 			if (IsRemoved(x))
 				continue;
+			int z = Z(x);
+			int z1 = Z(x-1);
+			int z2 = Z(x+1);
+			// Preserve peaks and valleys
+			if ((z > z1 && z > z2) || (z < z1 && z < z2))
+				KeepEdge(x);
+
 			if (x >= xprev + MAX_DISTANCE || IsEdge(x))
 			{
 				Preserve(x);
 				xprev = x;
 				continue;
 			}
+
 			xnext = x + 1;
 			// Calculate the error for all the points in the range
 			int error = 0;
@@ -643,11 +639,11 @@ public:
 }; // LineSimplifyByError
 
 
-/*! \brief Preserve sea level boundaries
+/*! \brief Preserve sea level boundaries in a line
 
-	 This class inserts grid points where there is a transition from sea to land
+	 This class keeps the points in the line points where there is a transition from sea to land
 */
-class KeepSeaLevelInLine : public LineSelector
+class KeepSeaLevelInLine : public GridSelector
 {
 	// Maximum and minimum sea level
 	double _maxLevel, _minLevel;
@@ -686,14 +682,14 @@ public:
 };
 
 //! \brief Marks the points in a line as boundary, the corners as edges
-class BoundaryMarker : public LineSelector
+class BoundaryMarker : public GridSelector
 {
 	void Process()
 	{
 		for (int x = 0; x < _n; x++)
-			Item(x) |= MESHPOINT_BOUNDARY;
-		Item(0) |= MESHPOINT_EDGE;
-		Item(_n-1) |= MESHPOINT_EDGE;
+			at(x) |= MESHPOINT_BOUNDARY;
+		at(0) |= MESHPOINT_EDGE;
+		at(_n-1) |= MESHPOINT_EDGE;
 	}
 };
 
@@ -738,7 +734,7 @@ public:
 
 //TestLineSimple t;
 
-void DEMesher::SelectBoundary(LineSelector& processor)
+void DEMesher::SelectBoundary(GridSelector& processor)
 {
 	// Run the four corners in the standard order (minx, miny) (maxx, miny) (maxx,maxy) (minx,maxy)
 	processor.Select(ptr(0),                 _qSize, 1);
@@ -812,18 +808,15 @@ void DEMesher::Generate(const Tile &north, const Tile &east, const Tile &northEa
 	double tolerance = 20;
 	double seaLevel = 0;
 	SimplifyFlat mesher(tolerance);
-	mesher.Select(_quantized.data(), _qSize);
+	mesher.Select(_quantized.data(), _qSize, _qSize);
 	SimplifySlope flattener(0.2);
-	flattener.Select(_quantized.data(), _qSize);
+	flattener.Select(_quantized.data(), _qSize, _qSize);
 
 	// Run the mesh simplification and the sea level detail on the boundary
 	LineSimplifyByError simplify(tolerance / 2);
 	KeepSeaLevelInLine forceSeaLevel(seaLevel, seaLevel);
 	SelectBoundary(simplify);
 	SelectBoundary(forceSeaLevel);
-
-
-	SaveQuantized("c:\\build\\temp\\quantized.json");
 }
 
 /*! \brief Saves the triangulated mesh into the scene
@@ -888,7 +881,7 @@ void DEMesher::Triangulate(scenegraph::Scene* scene)
 		for (x = 1; x < _qSize-1; x++)
 		{
 			int altitude = ptr(y)[x];
-			if ((altitude & MESHPOINT_REMOVED) == 0)
+			if ((altitude & MESHPOINT_REMOVED) == 0) //REVISIT: Removed all points
 			{
 				insertedPoints++;
 				if (dt.InsertConstrainedPoint(ScenePoint(x,y,altitude)) == 0)
@@ -974,6 +967,20 @@ void DEMesher::Triangulate(scenegraph::Scene* scene)
 }
 
 
+void AddTextureImage(const std::string& imageName, int imageSize, scenegraph::Face* face)
+{
+	auto& triangles = face->triangles;
+	face->textures.emplace_back();
+    scenegraph::MappedTexture &mt = face->textures.back();
+    mt.SetTextureName(imageName);
+    for (size_t i = 0; i<face->getNumVertices(); i++)
+    {
+		auto& v = face->verts[i];
+		// Since the image covers the tile the calculations are trivial
+        mt.uvs.push_back(sfa::Point(v.X()/imageSize, v.Y()/imageSize));
+    }
+
+}
 
 // Returns the tile at a certain coordinate, with the tiles North and West
 void FindTiles(std::vector<Tile>& tiles, const Tile& target, Tile& north, Tile& east, Tile &northEast)
@@ -1022,7 +1029,9 @@ int main(int argc, char **argv)
 	test.Generate(north,east,northEast);
 	std::unique_ptr<scenegraph::Scene> scene(new scenegraph::Scene());
 
+	scene.get()->name = center.Filename();
 	test.Triangulate(scene.get());
+	AddTextureImage("sampletexture.jpg", 512, &(scene.get()->faces[0]));
 	scenegraph::buildOpenFlightFromScene("c:/build/temp/terrain.flt", scene.get());
 
 
