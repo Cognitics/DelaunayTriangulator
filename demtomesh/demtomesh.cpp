@@ -11,6 +11,7 @@
 #include <scenegraph/Scene.h>
 #include <scenegraphflt/scenegraphflt.h>
 #include <cassert>
+#include <chrono>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -246,6 +247,13 @@ class DEMesher
 	int _qSize = 0;
 	std::vector<int> _quantized;
 
+	// Some configuration parameters: the color for the faces
+	int _faceRGB[3] = { 255, 255, 255 };
+
+	// Add an additional face with the sea level
+	bool _addSeaLevel = false;
+
+
 	int* ptr(int y) 
 	{ 
 		assert(y >= 0 && y < _qSize);
@@ -253,6 +261,7 @@ class DEMesher
 		if (y >= _qSize) y = _qSize - 1;
 		return _quantized.data() + _qSize * y; 
 	}
+
 
 	public: 
 
@@ -302,12 +311,14 @@ class DEMesher
 
 	void Generate(const Tile &north, const Tile &east, const Tile &northEast);
 
-	void Triangulate(scenegraph::Scene *saved);
+	void Triangulate(scenegraph::Scene *saved, sfa::Point origin);
 
 private:
 	void SelectBoundary(GridSelector& processor);
 	bool CopyGrid(elev::SimpleDEMReader &reader, int x, int y, int subsample=2);
 	void SaveQuantized(const char* fileName);
+
+	void SetSceneAttributes(scenegraph::Scene* scene);
 };
 
 //! \brief Writes a JSON with the quantized values, for analysis outside
@@ -736,11 +747,10 @@ public:
 
 void DEMesher::SelectBoundary(GridSelector& processor)
 {
-	// Run the four corners in the standard order (minx, miny) (maxx, miny) (maxx,maxy) (minx,maxy)
 	processor.Select(ptr(0),                 _qSize, 1);
+	processor.Select(ptr(0),                 _qSize, _qSize);
+	processor.Select(ptr(_qSize-1),          _qSize, 1);
 	processor.Select(ptr(0)+_qSize-1,        _qSize, _qSize);
-	processor.Select(ptr(_qSize-1)+_qSize-1, _qSize, -1);
-	processor.Select(ptr(_qSize - 1),        _qSize, -_qSize);
 }
 
 
@@ -777,24 +787,27 @@ void DEMesher::Generate(const Tile &north, const Tile &east, const Tile &northEa
 		}
 		ptr(0)[_qSize - 1] = ptr(0)[_qSize - 2];
 	}
+	fileName = _root + north.getFilename(".tif");
+	if (ccl::fileExists(fileName))
 	{
-		fileName = _root + north.getFilename(".tif");
 		std::cout << "North: " << fileName << std::endl;
 		elev::SimpleDEMReader reader(fileName, oSRS);
 		if (reader.Open())
 			// Copy the top-most row
 			CopyGrid(reader,0,-height+1,subsample);
 	}
+	fileName = _root + east.getFilename(".tif");
+	if (ccl::fileExists(fileName))
 	{
-		fileName = _root + east.getFilename(".tif");
 		std::cout << "East: " << fileName << std::endl;
 		elev::SimpleDEMReader reader(fileName, oSRS);
 		if (reader.Open())
 			// Copy the right-most column
 			CopyGrid(reader,width,1,subsample);
 	}
+	fileName = _root + northEast.getFilename(".tif");
+	if (ccl::fileExists(fileName))
 	{
-		fileName = _root + northEast.getFilename(".tif");
 		std::cout << "NorthEast: " << fileName << std::endl;
 		elev::SimpleDEMReader reader(fileName, oSRS);
 		if (reader.Open())
@@ -807,17 +820,35 @@ void DEMesher::Generate(const Tile &north, const Tile &east, const Tile &northEa
 
 	double tolerance = 20;
 	double seaLevel = 0;
-	SimplifyFlat mesher(tolerance);
-	mesher.Select(_quantized.data(), _qSize, _qSize);
-	SimplifySlope flattener(0.2);
-	flattener.Select(_quantized.data(), _qSize, _qSize);
-
 	// Run the mesh simplification and the sea level detail on the boundary
 	LineSimplifyByError simplify(tolerance / 2);
 	KeepSeaLevelInLine forceSeaLevel(seaLevel, seaLevel);
 	SelectBoundary(simplify);
 	SelectBoundary(forceSeaLevel);
+
+	SimplifyFlat mesher(tolerance);
+	mesher.Select(_quantized.data(), _qSize, _qSize);
+	SimplifySlope flattener(0.2);
+	flattener.Select(_quantized.data(), _qSize, _qSize);
+
 }
+
+void DEMesher::SetSceneAttributes(scenegraph::Scene* scene)
+{
+	if (!scene)
+		return;
+	scene->name = _tile.getFilename("");
+	scene->attributes.setAttribute("terrain", true);
+	auto sw = _tile.getCoordinates().low();
+	auto ne = _tile.getCoordinates().high();
+	scene->attributes.setAttribute("origin_lat", sw.latitude().value());
+	scene->attributes.setAttribute("origin_lon", sw.longitude().value());
+	scene->attributes.setAttribute("sw_lat", sw.latitude().value());
+	scene->attributes.setAttribute("sw_lon", sw.longitude().value());
+	scene->attributes.setAttribute("ne_lat", ne.latitude().value());
+	scene->attributes.setAttribute("ne_lon", ne.longitude().value());
+}
+
 
 /*! \brief Saves the triangulated mesh into the scene
 
@@ -826,10 +857,8 @@ void DEMesher::Generate(const Tile &north, const Tile &east, const Tile &northEa
 
 	The mesh becomes a Face in the scene. The (X,Y) coordinates are Y pointing up, the expectation 
 	is that the scene matrix will set the right orientation.
-
-	REVISIT:: Need to figure out the texture and the UV coordinates.
 */
-void DEMesher::Triangulate(scenegraph::Scene* scene)
+void DEMesher::Triangulate(scenegraph::Scene* scene, sfa::Point origin)
 {
 	// The boundary rectangle is counterclockwise, but on a 'normal' (Y up) axis
 	// the best way to build it is: (xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)
@@ -891,13 +920,32 @@ void DEMesher::Triangulate(scenegraph::Scene* scene)
 	std::vector<ctl::Edge*> edges;
 	edges = dt.GatherTriangles(ctl::PointList());
 	ctl::TIN container(&dt, edges);
+	int nominalTileSize = 1024;
+	int subsample = nominalTileSize / (_qSize-1);
+	int useTexture = true;
 	if (scene)
 	{
 		scene->hasVertexNormals = true;
+		scene->name = _tile.getFilename();
 		scene->faces.emplace_back();
 		scenegraph::Face& face = scene->faces.back();
-		face.primaryColor = scenegraph::Color(0.5f, 1.0f, 0.5f);
-		face.alternateColor = scenegraph::Color(0.5f, 1.0f, 0.5f);
+		face.primaryColor = scenegraph::Color((double)_faceRGB[0]/255.0, (double)_faceRGB[1]/255.0,(double)_faceRGB[2]/255.0);
+		face.alternateColor = face.primaryColor;
+
+		Tile imageTile = _tile;
+		imageTile.setDataset(Dataset::Imagery);
+		std::string imageName = ccl::joinPaths(_root, imageTile.getFilename(".jp2"));
+
+		scenegraph::MappedTexture* texture = nullptr;
+		
+		if (useTexture && ccl::fileExists(imageName))
+		{
+			std::cout << "Image tile " << nominalTileSize << ": " << imageName << std::endl;
+			face.textures.emplace_back();
+			texture = &(face.textures.back());
+			texture->SetTextureName(imageName);
+			nominalTileSize /= subsample;
+		}
 
 		bool success = true;
 		auto &verts = container.verts;
@@ -916,8 +964,10 @@ void DEMesher::Triangulate(scenegraph::Scene* scene)
 					corners[numCorners] = corners[3] = numPoints;
 				numCorners++;
 			}
-			face.addVert(sfa::Point(v.x, v.y, v.z));
+			face.addVert(sfa::Point(v.x*subsample, v.y*subsample, v.z)+origin);
 			face.vertexNormals.push_back(sfa::Point(normals[i].x, normals[i].y, normals[i].x));
+			if (texture)
+				texture->uvs.push_back(sfa::Point(v.x/nominalTileSize, v.y/nominalTileSize));
 			numPoints++;
 		}
 
@@ -932,10 +982,9 @@ void DEMesher::Triangulate(scenegraph::Scene* scene)
 				++numTriangles;
 			}
 		}
-
 		
 		// Add a new face with blue color that marks the sea level
-		if (numCorners >= 4)
+		if (numCorners >= 4 && _addSeaLevel)
 		{
 			scene->faces.emplace_back();
 			scenegraph::Face& seaSurface = scene->faces.back();
@@ -950,7 +999,7 @@ void DEMesher::Triangulate(scenegraph::Scene* scene)
 				if (v.x >= _qSize) v.x = _qSize - 1;
 				if (v.y < 0) v.y = 0;
 				if (v.y >= _qSize) v.y = _qSize - 1;
-				seaSurface.addVert(sfa::Point(v.x, v.y, v.z));
+				seaSurface.addVert(sfa::Point(v.x*subsample, v.y*subsample, v.z)+origin);
 				seaSurface.vertexNormals.push_back(sfa::Point(0, 0, 1));
 			}
 			success = success && seaSurface.AddFacet(0, 1, 2);
@@ -969,7 +1018,6 @@ void DEMesher::Triangulate(scenegraph::Scene* scene)
 
 void AddTextureImage(const std::string& imageName, int imageSize, scenegraph::Face* face)
 {
-	auto& triangles = face->triangles;
 	face->textures.emplace_back();
     scenegraph::MappedTexture &mt = face->textures.back();
     mt.SetTextureName(imageName);
@@ -1007,32 +1055,46 @@ int main(int argc, char **argv)
 {
 	cognitics::gdal::init(argv[0]);
 	char const* cdb = "C:/ocb/CDB_Yemen_4.0.0";
-	int LOD = 4;
-	double increment = 1.0 / (2 << LOD);
+	int LOD = 6;
+	double increment = 2.0 / (2 << LOD);
 	//Coordinates target(12.75, 45);
 	//Coordinates target(12.75, 44.97);
-	Coordinates target(12.78, 45.043); LOD = 6;
-	CoordinatesRange corner(target.longitude().value()-increment, target.longitude().value()+increment*2,
-		target.latitude().value()-increment, target.latitude().value()+increment*2);
-	auto tiles = generate_tiles(corner,Dataset::Elevation,LOD);
-	Tile center;
-	for (auto& t : tiles)
-		if (t.getCoordinates().low().latitude().value() <= target.latitude().value() &&
-			t.getCoordinates().low().longitude().value() <= target.longitude().value() &&
-			t.getCoordinates().high().latitude().value() > target.latitude().value() &&
-			t.getCoordinates().high().longitude().value() > target.longitude().value())
-			center = t;
+	Coordinates target(12.78, 45.043);
+	CoordinatesRange corner(target.longitude().value()-increment, target.longitude().value()+increment,
+		target.latitude().value()-increment, target.latitude().value()+increment);
+	auto tiles = generate_tiles(corner, Dataset::Elevation, LOD);
 
-	Tile north, east, northEast;
-	FindTiles(tiles,center,north,east,northEast);
-	DEMesher test(cdb,center);
-	test.Generate(north,east,northEast);
+	auto centerTiles = generate_tiles(CoordinatesRange(target, target), Dataset::Elevation, LOD);
 	std::unique_ptr<scenegraph::Scene> scene(new scenegraph::Scene());
+	scene.get()->name = centerTiles[0].Filename();
+	auto origin = centerTiles[0].getCoordinates().low();
 
-	scene.get()->name = center.Filename();
-	test.Triangulate(scene.get());
-	AddTextureImage("sampletexture.jpg", 512, &(scene.get()->faces[0]));
+    auto ts_start = std::chrono::steady_clock::now();
+
+
+	for (Tile& current : tiles)
+	{
+		Tile north, east, northEast;
+		FindTiles(tiles, current, north, east, northEast);
+		double displacementY = current.getCoordinates().low().latitude().value() - origin.latitude().value();
+		double displacementX = current.getCoordinates().low().longitude().value() - origin.longitude().value();
+		// At LOD=0 the tile displacement is 1 degree. Convert to tile units
+
+		sfa::Point offset(displacementX * (1024 << LOD), displacementY * (1024 << LOD));
+		DEMesher test(cdb, current);
+		test.Generate(north, east, northEast);
+		std::cout << "Origin: " << offset.X() << "  " << offset.Y() << std::endl;
+		scenegraph::Scene* tileScene = new scenegraph::Scene(scene.get());
+		test.Triangulate(tileScene, offset);
+	}
+    auto ts_stop = std::chrono::steady_clock::now();
+	double time = std::chrono::duration<double>(ts_stop - ts_start).count();
+    std::cout<< ("runtime: " + std::to_string(tiles.size()/time)+" tiles/second");
+
+
 	scenegraph::buildOpenFlightFromScene("c:/build/temp/terrain.flt", scene.get());
+//	AddTextureImage("N12E045_D004_S001_T001_L06_U49_R2.jp2", 512, &(scene.get()->faces[0]));
+	return 0;
 
 
 	for (double s =89; s<=90; s+=0.1)
