@@ -16,6 +16,7 @@
 #include <iomanip>
 #include <iostream>
 #undef min
+#undef max
 
 
 
@@ -23,90 +24,90 @@ using namespace cognitics::cdb;
 
 /*! \brief Saves triangulation results to a file
 
-	First the caller will add all the vertices using AddVertex(). Each order gets an index
+    First the caller will add all the vertices using AddVertex(). Each order gets an index
 
-	Derived classes implement the AddPolygon(), AddVertex() and AddTriangle() methods
-	AddPolygon() is optional
+    Derived classes implement the AddPolygon(), AddVertex() and AddTriangle() methods
+    AddPolygon() is optional
 */
 
 class MeshWriter
 {
 public:
-	virtual ~MeshWriter() {}
-	virtual bool AddVertex(const ctl::Point& p) = 0;
-	virtual bool AddFacet(int index1, int index2, int index3) = 0;
-	virtual bool AddPolygon(const ctl::PointList& polygon) { return true; }
-	virtual bool Close() { return true; }
+    virtual ~MeshWriter() {}
+    virtual bool AddVertex(const ctl::Point& p) = 0;
+    virtual bool AddFacet(int index1, int index2, int index3) = 0;
+    virtual bool AddPolygon(const ctl::PointList& polygon) { return true; }
+    virtual bool Close() { return true; }
 };
 
 //! \brief Writer that generates a simple .obj mesh file
 class ObjMeshWriter : public MeshWriter
 {
-	std::string _fileName;
-	std::ofstream _fd;
-	int _vertexCount = 0;
+    std::string _fileName;
+    std::ofstream _fd;
+    int _vertexCount = 0;
 
 public:
-	ObjMeshWriter(const std::string& fileName) : _fileName(fileName)
-	{}
-	~ObjMeshWriter()
-	{
-		Discard();
-	}
+    ObjMeshWriter(const std::string& fileName) : _fileName(fileName)
+    {}
+    ~ObjMeshWriter()
+    {
+        Discard();
+    }
 
 //! \brief Closes the file and deletes it so that it is not left around
-	void Discard()
-	{
-		Close();
-	}
-	bool Open()
-	{
-		if (!_fd.is_open())
-		{
-			_fd.open(_fileName, std::ios_base::binary | std::ios_base::out | std::ios_base::trunc);
-			_fd << std::setprecision(3);
-		}
-		return _fd.is_open();
-	}
-	bool Close()
-	{
-		if (_fd.is_open())
-			_fd.close();
-		_vertexCount = 0;
-		return true;
-	}
-	bool AddVertex(const ctl::Point& p)
-	{
-		if (!Open())
-			return false;
+    void Discard()
+    {
+        Close();
+    }
+    bool Open()
+    {
+        if (!_fd.is_open())
+        {
+            _fd.open(_fileName, std::ios_base::binary | std::ios_base::out | std::ios_base::trunc);
+            _fd << std::setprecision(3);
+        }
+        return _fd.is_open();
+    }
+    bool Close()
+    {
+        if (_fd.is_open())
+            _fd.close();
+        _vertexCount = 0;
+        return true;
+    }
+    bool AddVertex(const ctl::Point& p)
+    {
+        if (!Open())
+            return false;
 
-		// We save the geometric coordinates only
-		char str[200];
-		double r = 0, g = 0, b = 0;
-		if (p.z <= 0)
-			b = 1.0;
-		else
-			r = p.z/300;
-		sprintf_s(str, "v %.3f %.3f %.3f %.3f %.3f %.3f\n", p.x, p.y, p.z, r, g, b);
-	
+        // We save the geometric coordinates only
+        char str[200];
+        double r = 0, g = 0, b = 0;
+        if (p.z <= 0)
+            b = 1.0;
+        else
+            r = p.z/300;
+        sprintf_s(str, "v %.3f %.3f %.3f %.3f %.3f %.3f\n", p.x, p.y, p.z, r, g, b);
+    
 //        _fd << "v " << p.x << " " << p.y << " " << p.z "\n";
-		_fd << str;
-		++_vertexCount;
-		return true;
-	}
+        _fd << str;
+        ++_vertexCount;
+        return true;
+    }
 
-	virtual bool AddFacet(int index1, int index2, int index3)
-	{
-		if (!Open())
-			return false;
-		if (index1 < 0 || index1 >= _vertexCount ||
-			index2 < 0 || index2 >= _vertexCount ||
-			index3 < 0 || index3 >= _vertexCount)
-				return false;
-		// Note that OBJ indexes start at 1
-		_fd << "f " << index1+1 << " " << index2+1 << " " << index3+1 << "\n";
-		return true;
-	}
+    virtual bool AddFacet(int index1, int index2, int index3)
+    {
+        if (!Open())
+            return false;
+        if (index1 < 0 || index1 >= _vertexCount ||
+            index2 < 0 || index2 >= _vertexCount ||
+            index3 < 0 || index3 >= _vertexCount)
+                return false;
+        // Note that OBJ indexes start at 1
+        _fd << "f " << index1+1 << " " << index2+1 << " " << index3+1 << "\n";
+        return true;
+    }
 
 }; // ObjMeshWriter
 
@@ -115,17 +116,17 @@ public:
  //         contain the flags POINT_xxx
 int MeshElevationToQuantized(double elevation)
 {
-	return ((int)(elevation * 100)) << 8;
+    return ((int)(elevation * 100)) << 8;
 }
 
 int MeshQuantizedZ(int quantized)
 {
-	return quantized >> 8;
+    return quantized >> 8;
 }
 
 double MeshQuantizedToElevation(int quantized)
 {
-	return (double)MeshQuantizedZ(quantized)/100.0;
+    return (double)MeshQuantizedZ(quantized)/100.0;
 }
 
 
@@ -133,371 +134,468 @@ double MeshQuantizedToElevation(int quantized)
 //      To facilitate the traversal of the elevation array this flags indicate 
 //      how each point should be handled
 enum {
-	MESHPOINT_BOUNDARY = 1,  // The point is the bounday of the target area
-	MESHPOINT_REMOVED = 2,   // The point was discarded, considered not relevant
-	MESHPOINT_EDGE = 4,      // The point was identified as an edge between removed areas, so it should be preserved
-	MESHPOINT_PENDING = 8    // The point has been already pushed in the analysis stack
+    MESHPOINT_BOUNDARY = 1,  // The point is the bounday of the target area
+    MESHPOINT_REMOVED = 2,   // The point was discarded, considered not relevant
+    MESHPOINT_EDGE = 4,      // The point was identified as an edge between removed areas, so it should be preserved
+    MESHPOINT_PENDING = 8    // The point has been already pushed in the analysis stack
 };
 
 
 /*! \brief Represents a vector or array of elevation elements
     The structure points to a table of elevation values organized by rows. 
-	If the structure represents a vector, only the first element of each row is used
+    If the structure represents a vector, only the first element of each row is used
 
 */
 class QuantizedElevation
 {
 protected:
-	int *_data = nullptr; // Pointer to the first quantized array
-	int _n = 0;    // Number of rows
-	int _step = 1; // Step between rows, could be negative. If it is an array, this is the number of columns
+    int *_data = nullptr; // Pointer to the first quantized array
+    int _n = 0;    // Number of rows
+    int _step = 1; // Step between rows, could be negative. If it is an array, this is the number of columns
 
 public:
-	int rows() { return _n; }
-	int cols() { return _step >= 0 ? _step : -_step; }
+    int rows() { return _n; }
+    int cols() { return _step >= 0 ? _step : -_step; }
 
-	int* ptr(int y, int x=0) 
-	{
-		if (y < 0 || y >= rows() || x<0 || x >= cols())
-			return nullptr;
-		return _data + y * _step + x;
-	}
+    int* ptr(int y, int x=0) 
+    {
+        if (y < 0 || y >= rows() || x<0 || x >= cols())
+            return nullptr;
+        return _data + y * _step + x;
+    }
 
-	// A few simple macros to manipulate the quantized elevations
-	// Reference to an entry
-	int& at(int y, int x=0) { return ptr(y,x)[0]; }
+    int* top() { return ptr(0); }
+    int* bot() { return ptr(_n-1); }
+
+    // A few simple macros to manipulate the quantized elevations
+    // Reference to an entry
+    int& at(int y, int x=0) { return ptr(y,x)[0]; }
 
 
-	// Return the elevation of a line point, without the flags
-	int Z(int y, int x=0) { return MeshQuantizedZ(at(y,x)); }
+    // Return the elevation of a line point, without the flags
+    int Z(int y, int x=0) { return MeshQuantizedZ(at(y,x)); }
 
-	void Remove(int y, int x=0)    { at(y,x) |= MESHPOINT_REMOVED; };   // Remove from triangulation
-	void Preserve(int y, int x=0) { at(y,x) &= (~MESHPOINT_REMOVED); }; // Marks the value to be used
-	void KeepEdge(int y, int x=0) { at(y,x) |= MESHPOINT_EDGE; at(y,x) &= (~MESHPOINT_REMOVED); }; // Edge to be forced into the triangulation
-	bool IsRemoved(int y, int x=0) { return (at(y,x) & MESHPOINT_REMOVED) != 0; }
-	bool IsEdge(int y, int x=0)    { return (at(y,x) & MESHPOINT_EDGE) != 0; }
+    void Remove(int y, int x=0)    { at(y,x) |= MESHPOINT_REMOVED; };   // Remove from triangulation
+    void Preserve(int y, int x=0) { at(y,x) &= (~MESHPOINT_REMOVED); }; // Marks the value to be used
+    void KeepEdge(int y, int x=0) { at(y,x) |= MESHPOINT_EDGE; at(y,x) &= (~MESHPOINT_REMOVED); }; // Edge to be forced into the triangulation
+    bool IsRemoved(int y, int x=0) { return (at(y,x) & MESHPOINT_REMOVED) != 0; }
+    bool IsEdge(int y, int x=0)    { return (at(y,x) & MESHPOINT_EDGE) != 0; }
+
+    void FromVector(std::vector<int> &values, int rowSize)
+    {
+        rowSize = std::max(rowSize, 0);
+        _data = values.data();
+        _n = (int)values.size() / rowSize;
+        _step = rowSize;
+    }
 };
 
 
 
 /*! \brief Generic interface to tweak the selected points in quantized elevations
-	
+    
 Derived classes implement the Process() method that carry out the processing. The intention is
 that the should only remove some elements from the triangulation, or preserve them.
 
 \code
-		class Simplifier : public DEMesher::GridSelector 
-		{
-		void Process();
-		};
-		Simplifier s;
+        class Simplifier : public DEMesher::GridSelector 
+        {
+        void Process();
+        };
+        Simplifier s;
 
-		// Lines are 65 values long, the distance between them is 513 values
-		// Force to preserve the first two values and the last two values
-		int *firstPoint = GetFirstPoint();
-		firstPoint[0*513] |= MESHPOINT_EDGE;
-		firstPoint[1*513] |= MESHPOINT_EDGE;
-		firstPoint[63*513] |= MESHPOINT_EDGE;
-		firstPoint[64*513] |= MESHPOINT_EDGE;
-		s.Select(firstPoint, 65, 513);
+        // Lines are 65 values long, the distance between them is 513 values
+        // Force to preserve the first two values and the last two values
+        int *firstPoint = GetFirstPoint();
+        firstPoint[0*513] |= MESHPOINT_EDGE;
+        firstPoint[1*513] |= MESHPOINT_EDGE;
+        firstPoint[63*513] |= MESHPOINT_EDGE;
+        firstPoint[64*513] |= MESHPOINT_EDGE;
+        s.Select(firstPoint, 65, 513);
 \endcode
 */
 class GridSelector : public QuantizedElevation
 {
 protected:
-	virtual ~GridSelector() {}
+    virtual ~GridSelector() {}
 
 /*! \brief Implements simplification of the line
 
-	The fields _first, _n and _step contain the location of tha target line
+    The fields _first, _n and _step contain the location of tha target line
 */
-	virtual void Process() = 0;
+    virtual void Process() = 0;
 
 public:
 //! \brief Sends a line (defined by the start and the step interval) to a line selector
-	void Select(int* line, int n, int step)
-	{
-		if (!line || n <= 0)
-			return;
-		_n = n;
-		_data = line;
-		_step = step;
-		Process();
-	}
+    void Select(int* line, int n, int step)
+    {
+        if (!line || n <= 0)
+            return;
+        _n = n;
+        _data = line;
+        _step = step;
+        Process();
+    }
 };
 
 /*!
-	\brief Generates the mesh for a CDB tile.
+    \brief Generates the mesh for a CDB tile.
 
-	This implementation assumes that the DEM files are aligned with the tile.
+    This implementation assumes that the DEM files are aligned with the tile.
 */
 class DEMesher
 {
-	// Location of the geoTile for this tile
-	Tile _tile;
+    // Location of the geoTile for this tile
+    Tile _tile;
 
-	// The base for the CDB
-	std::string _root;
+    // The base for the CDB
+    std::string _root;
 
-	// Quantized altitude vector. The altitudes are defined at the corners of the
-	// grid, starting at the NorthWest corner.
-	// Note that the first entry of the table is the altitude of the NW corner
-	// of the target area. It is not shifted as in the CDB specification. So the
-	// array contains one more row and one more column than the tile size
-	int _qSize = 0;
-	std::vector<int> _quantized;
+    // Quantized altitude vector. The altitudes are defined at the corners of the
+    // grid, starting at the NorthWest corner.
+    // Note that the first entry of the table is the altitude of the NW corner
+    // of the target area. It is not shifted as in the CDB specification. So the
+    // array contains one more row and one more column than the tile size
+    int _qSize = 0;
+    std::vector<int> _quantized;
+    QuantizedElevation _elev;
 
-	// Some configuration parameters: the color for the faces
-	int _faceRGB[3] = { 255, 255, 255 };
+    // Some configuration parameters: the color for the faces
+    int _faceRGB[3] = { 255, 255, 255 };
 
-	// Add an additional face with the sea level
-	bool _addSeaLevel = false;
-
-
-	int* ptr(int y) 
-	{ 
-		assert(y >= 0 && y < _qSize);
-		if (y < 0) y = 0;
-		if (y >= _qSize) y = _qSize - 1;
-		return _quantized.data() + _qSize * y; 
-	}
+    // Add an additional face with the sea level
+    bool _addSeaLevel = false;
 
 
-	public: 
+    int* ptr(int y) 
+    { 
+        assert(y >= 0 && y < _qSize);
+        if (y < 0) y = 0;
+        if (y >= _qSize) y = _qSize - 1;
+        return _quantized.data() + _qSize * y; 
+    }
+
+    bool IsGenerated() const { return _quantized.size() > 0; }
+
+    public: 
 
  //! \brief Creates a mesher for the tile at a certain latitude and longitude
-	DEMesher(const std::string &cdbRoot, const Tile& t) :
-		  _root(cdbRoot),
-		  _tile(t) {}
+    DEMesher(const std::string &cdbRoot, const Tile& t) :
+          _root(cdbRoot),
+          _tile(t) {}
 
-	DEMesher(const std::string &cdbRoot, Latitude south, Longitude west, int LOD) :
-		_root(cdbRoot)
-	{
-		TileLatitude geoLat(south);
-		int tileWidth = get_tile_width(geoLat);
-		TileLongitude geoLng(geoLat, west);
-		if (LOD < 0)
-			LOD = 0;
-		int scale = (1 << LOD);
-		int up = static_cast<int>((south.value() - geoLat.value()) * scale);
-		int right = static_cast<int>((west.value() - geoLng.value()) * scale)/tileWidth;
+    DEMesher(const std::string &cdbRoot, Latitude south, Longitude west, int LOD) :
+        _root(cdbRoot)
+    {
+        TileLatitude geoLat(south);
+        int tileWidth = get_tile_width(geoLat);
+        TileLongitude geoLng(geoLat, west);
+        if (LOD < 0)
+            LOD = 0;
+        int scale = (1 << LOD);
+        int up = static_cast<int>((south.value() - geoLat.value()) * scale);
+        int right = static_cast<int>((west.value() - geoLng.value()) * scale)/tileWidth;
 
-		// Use DS001, S001, T001, tiles for the terrain elevation
-		_tile.setDataset(Dataset(Dataset::Elevation));
-		_tile.setLod(LOD);
-		_tile.setCs1(1);
-		_tile.setCs2(1);
-		_tile.setUref(up);
-		_tile.setRref(right);
+        // Use DS001, S001, T001, tiles for the terrain elevation
+        _tile.setDataset(Dataset(Dataset::Elevation));
+        _tile.setLod(LOD);
+        _tile.setCs1(1);
+        _tile.setCs2(1);
+        _tile.setUref(up);
+        _tile.setRref(right);
 
-		// The coordinates of the tile
-		CoordinatesRange range(geoLng.value() + right * tileWidth / (double)scale,
-			geoLng.value() + (right + 1) * tileWidth / (double)scale,
-			geoLat.value() + up / (double)scale,
-			geoLat.value() + (up + 1)/(double) scale);
-		_tile.setCoordinates(range);
-	}
+        // The coordinates of the tile
+        CoordinatesRange range(geoLng.value() + right * tileWidth / (double)scale,
+            geoLng.value() + (right + 1) * tileWidth / (double)scale,
+            geoLat.value() + up / (double)scale,
+            geoLat.value() + (up + 1)/(double) scale);
+        _tile.setCoordinates(range);
+    }
 
-	Tile& TargetTile() { return _tile; }
+    Tile& TargetTile() { return _tile; }
 
-	bool CheckForCDB()
-	{
-		_root = ccl::standardizeSlashes(_root);
-		if(!_root.size() || _root.back()!='/')
-			_root += "/";
-		ccl::FileInfo fi;
-		return ccl::directoryExists(_root);
-	}
+    bool CheckForCDB()
+    {
+        _root = ccl::standardizeSlashes(_root);
+        if(!_root.size() || _root.back()!='/')
+            _root += "/";
+        ccl::FileInfo fi;
+        return ccl::directoryExists(_root);
+    }
 
-	void Generate(const Tile &north, const Tile &east, const Tile &northEast);
+    bool Generate(const Tile &north, const Tile &east, const Tile &northEast);
 
-	void Triangulate(scenegraph::Scene *saved, sfa::Point origin);
+    void Triangulate(scenegraph::Scene *saved, sfa::Point origin);
 
 private:
-	void SelectBoundary(GridSelector& processor);
-	bool CopyGrid(elev::SimpleDEMReader &reader, int x, int y, int subsample=2);
-	void SaveQuantized(const char* fileName);
+    void SelectBoundary(GridSelector& processor);
+    bool CopyGrid(const Tile &source, int x, int y);
+    void SaveQuantized(const char* fileName);
 
-	void SetSceneAttributes(scenegraph::Scene* scene);
 };
+
+
+//! \brief Sets the name and location of the scene that represents the tile
+void SetSceneAttributes(scenegraph::Scene* scene, const std::string &name, const CoordinatesRange &location);
+
+
+/*! \brief Cache of tile data.
+    
+    To complete the tile each mesher needs to read the three surrounding tiles. To avoid reading 
+    the DEM files over and over, this cache keeps the data as it has been read. 
+*/
+class DEMCache
+{
+public:
+    static int _tileSize;
+
+    // To save a lot of memory the cache entry discards the grid when it is no
+    // longer needed and leaves only four lines with the boundaries:
+    //   -top, bottom, left, right
+
+    static std::vector<int> *GetGrid(const Tile &tile, const std::string& cdbRoot);
+    static void FreeGrid(const Tile& tile);
+    
+};
+
+int DEMCache::_tileSize = 512;
+std::map<std::string, std::vector<int> *> elevationCache;
+
+void DEMCache::FreeGrid(const Tile &tile)
+{
+    auto range = tile.getFilename();
+    auto found = elevationCache.find(range);
+    if (found != elevationCache.end())
+    {
+        delete found->second;
+        elevationCache.erase(range);
+    }
+}
+
+std::vector<int> * DEMCache::GetGrid(const Tile& tile, const std::string& cdbRoot)
+{
+    std::string fileName = cdbRoot+tile.getFilename(".tif");
+    if (!ccl::fileExists(fileName))
+        return nullptr;
+    auto range = tile.getFilename(".tif");
+    auto found = elevationCache.find(range);
+    if (found != elevationCache.end())
+    {
+        std::vector<int>* grid = found->second;
+        if (grid->size() == _tileSize * _tileSize)
+            return grid;
+        FreeGrid(tile);
+    }
+
+    OGRSpatialReference oSRS; // GDAL reference system
+    oSRS.SetWellKnownGeogCS("WGS84");
+    elev::SimpleDEMReader reader(fileName, oSRS);
+    if (!reader.Open())
+        return nullptr;
+
+    int width = reader.getWidth();
+    int height = reader.getHeight();
+    if (width != height || width<_tileSize || height < _tileSize)
+        return nullptr;
+    double scaleFactor = (float)_tileSize / (float)width;
+    reader.setScaleFactor((float)_tileSize/(float)width);
+
+    width = reader.getScaledWidth();
+    height = reader.getScaledHeight();
+    //REVISIT: Can we have rounding errors
+    if (width < _tileSize || height < _tileSize)
+        return nullptr;
+
+
+    std::vector<double> originalGrid;
+    reader.getGrid(originalGrid);
+    std::vector<int>* grid = new std::vector<int>(_tileSize * _tileSize);
+    for (int y = 0; y < _tileSize; y++)
+    {
+        for (int x = 0; x < _tileSize; x++)
+            (*grid)[y*_tileSize + x] = MeshElevationToQuantized(originalGrid[y*width + x]);
+    }
+    elevationCache[range] = grid;
+    return grid;
+}
 
 //! \brief Writes a JSON with the quantized values, for analysis outside
 void DEMesher::SaveQuantized(const char* fileName)
 {
-	std::ofstream fd(fileName, std::ios_base::out | std::ios_base::binary);
-	fd << "{ \"data\": [\n";
-	for(int y = 0; y < _qSize; y++)
-	{
-		int* src = ptr(y);
-		if(y > 0)
-			fd << ",\n";
-		fd << "[ ";
-		for(int x = 0; x < _qSize; x++)
-		{
-			if(x > 0)
-			{
-				fd << ",";
-				if((x % 100) == 0)
-					fd << "\n  ";
-			}
-			fd << src[x];
-		}
-		fd << " ]";
-	}
-	fd << " \n] }\n";
+    std::ofstream fd(fileName, std::ios_base::out | std::ios_base::binary);
+    fd << "{ \"data\": [\n";
+    for(int y = 0; y < _qSize; y++)
+    {
+        int* src = ptr(y);
+        if(y > 0)
+            fd << ",\n";
+        fd << "[ ";
+        for(int x = 0; x < _qSize; x++)
+        {
+            if(x > 0)
+            {
+                fd << ",";
+                if((x % 100) == 0)
+                    fd << "\n  ";
+            }
+            fd << src[x];
+        }
+        fd << " ]";
+    }
+    fd << " \n] }\n";
 }
 
 
 //! \brief Copies the grid from a reader to the quantized grid
 //! \param x,y are the indexes of the top-left corner of the incoming data
 //       relative to the tile grid. They can be negative
-bool DEMesher::CopyGrid(elev::SimpleDEMReader &reader, int x, int y, int subsample)
+bool DEMesher::CopyGrid(const Tile &source, int x, int y)
 {
-	std::vector<double> points;
-	int width = reader.getWidth();
-	int height = reader.getHeight();
-	bool valid = reader.getGrid(points);
-	if(!valid)
-		return false;
-	int srcx = 0, srcy = 0;
-	if(x < 0)
-	{
-		srcx = -x;
-		x = 0;
-	}
-	if(y < 0)
-	{
-		srcy = -y;
-		y = 0;
-	}
+    std::cout << "File: " << source.getFilename() << std::endl;
+    auto grid = DEMCache::GetGrid(source, _root);
+    if (!grid)
+        return false;
 
-	// Copy the sections that overlap in the two arrays to the destination. Note that
-	// we are subsampling the input.
-	int copyWidth = std::min(_qSize - x, width / subsample - srcx);
-	for(;y<_qSize && srcy<height/subsample; y++, srcy++)
-	{ 
-		int* dst = ptr(y) + x;
-		double* srcRow = points.data() + width * subsample *srcy + subsample * srcx;
-		for(int i = 0; i < copyWidth; i++)
-			dst[i] = MeshElevationToQuantized(srcRow[i * subsample]);
-	}
-	return true;
+    int gridSize = _qSize - 1;
+    int srcx = 0, srcy = 0;
+    if(x < 0)
+    {
+        srcx = -x;
+        x = 0;
+    }
+    if(y < 0)
+    {
+        srcy = -y;
+        y = 0;
+    }
+
+    // Copy the sections that overlap in the two arrays to the destination. Note that
+    // we are subsampling the input.
+    int copyWidth = std::min(_qSize - x, gridSize - srcx);
+    for(; y<_qSize && srcy<gridSize; y++, srcy++)
+    { 
+        int* dst = ptr(y) + x;
+        int* srcRow = (*grid).data() + gridSize *srcy + srcx;
+        for(int i = 0; i < copyWidth; i++)
+            dst[i] = srcRow[i];
+    }
+    return true;
 }
 
 /*! \brief Removes triangulation points from flat areas
 
-	The points at the boundary must be marked with MESHPOINT_BOUNDARY so that the algorithm
-	does not exceed the limits of the tile.
+    The points at the boundary must be marked with MESHPOINT_BOUNDARY so that the algorithm
+    does not exceed the limits of the tile.
 
-	The function checks areas of the image where the point altitudes are within a range.
-	All the points inside are removed.
+    The function checks areas of the image where the point altitudes are within a range.
+    All the points inside are removed.
 
-	Elevation zero is handled differently because it corresponds to sea level. Only 
-	posts with elevation zero are combined.
+    Elevation zero is handled differently because it corresponds to sea level. Only 
+    posts with elevation zero are combined.
 
-	The algorithm is connected components:
-	   -for each point, put in stack each neighbor which is within range AND is not
-		an edge, boundary, or discarded
-	   -if all four neighbors are within range, mark the point as discarded. Otherwise
-		mark as edge
-	   -pop next point from stack
+    The algorithm is connected components:
+       -for each point, put in stack each neighbor which is within range AND is not
+        an edge, boundary, or discarded
+       -if all four neighbors are within range, mark the point as discarded. Otherwise
+        mark as edge
+       -pop next point from stack
 */
 class SimplifyFlat : public GridSelector
 {
 public:
-	SimplifyFlat(double toleranceMeters) :
-		_tolerance(toleranceMeters) {}
+    SimplifyFlat(double toleranceMeters) :
+        _tolerance(toleranceMeters) {}
 
 private:
-	double _tolerance = 0;
-	std::vector<int> _stack; // The stack contains the positions of the next point pending to check. It contains indexes
+    double _tolerance = 0;
+    std::vector<int> _stack; // The stack contains the positions of the next point pending to check. It contains indexes
 
-	void Process()
-	{
-		int tolerance = 0; // Quantized tolerance. It is zero when selecting points at sea level
-		if (_step <=1 || _n<=1)
-			return;
+    void Process()
+    {
+        int tolerance = 0; // Quantized tolerance. It is zero when selecting points at sea level
+        if (_step <=1 || _n<=1)
+            return;
 
-		int limit = rows()*cols()-1;
+        int limit = rows()*cols()-1;
 
-		// The altitude range of the current region. We need to make sure the range does 
-		// not exceed the tolerance
-		int low, high;
+        // The altitude range of the current region. We need to make sure the range does 
+        // not exceed the tolerance
+        int low, high;
 
-		auto CheckNeighbor = [&](int index)->bool
-		{
-			assert(index >= 0 && index < rows() * cols());
-			int altitude = MeshQuantizedZ(_data[index]);
-			if (altitude == 0 && tolerance != 0)
-				return false;
-			bool inRange = altitude >= high - tolerance && altitude <= low + tolerance;
-			if (inRange)
-			{
-				if (low > altitude)
-					low = altitude;
-				else if (high < altitude)
-					high = altitude;
-				if ((_data[index] & (MESHPOINT_BOUNDARY | MESHPOINT_REMOVED | MESHPOINT_EDGE | MESHPOINT_PENDING)) == 0)
-				{
-					_data[index] |= MESHPOINT_PENDING;
-					_stack.push_back(index);
-				}
-			}
-			else if (altitude != 0 && tolerance != 0 && _data[index] & (MESHPOINT_BOUNDARY | MESHPOINT_EDGE))
-			{
-				// If the neighbor is an edge and the altitude is close to the limit, let's
-				// discard it anyway
-				int highTolerance = (tolerance * 12) / 10;
-				inRange = altitude >= high - highTolerance && altitude <= low + highTolerance;
-			}
+        auto CheckNeighbor = [&](int index)->bool
+        {
+            assert(index >= 0 && index < rows() * cols());
+            int altitude = MeshQuantizedZ(_data[index]);
+            if (altitude == 0 && tolerance != 0)
+                return false;
+            bool inRange = altitude >= high - tolerance && altitude <= low + tolerance;
+            if (inRange)
+            {
+                if (low > altitude)
+                    low = altitude;
+                else if (high < altitude)
+                    high = altitude;
+                if ((_data[index] & (MESHPOINT_BOUNDARY | MESHPOINT_REMOVED | MESHPOINT_EDGE | MESHPOINT_PENDING)) == 0)
+                {
+                    _data[index] |= MESHPOINT_PENDING;
+                    _stack.push_back(index);
+                }
+            }
+            else if (altitude != 0 && tolerance != 0 && _data[index] & (MESHPOINT_BOUNDARY | MESHPOINT_EDGE))
+            {
+                // If the neighbor is an edge and the altitude is close to the limit, let's
+                // discard it anyway
+                int highTolerance = (tolerance * 12) / 10;
+                inRange = altitude >= high - highTolerance && altitude <= low + highTolerance;
+            }
 
-			return inRange;
-		};
+            return inRange;
+        };
 
-		int removed = 0;
-		int edges = 0;
+        int removed = 0;
+        int edges = 0;
 
-		// Check all the point, skipping the first and last rows because they are boundaries
-		for (int testIndex = cols(); testIndex < limit; testIndex++)
-		{
-			int v = _data[testIndex];
-			if (v & (MESHPOINT_BOUNDARY | MESHPOINT_REMOVED | MESHPOINT_EDGE))
-				continue;
-			low = high = MeshQuantizedZ(v);
+        // Check all the point, skipping the first and last rows because they are boundaries
+        for (int testIndex = cols(); testIndex < limit; testIndex++)
+        {
+            int v = _data[testIndex];
+            if (v & (MESHPOINT_BOUNDARY | MESHPOINT_REMOVED | MESHPOINT_EDGE))
+                continue;
+            low = high = MeshQuantizedZ(v);
 
-			// For a point at sea level the tolerance is zero so that the area only contains points at sea level
-			tolerance = (low == 0) ? 0 : MeshQuantizedZ(MeshElevationToQuantized(_tolerance));
-			_stack.push_back(testIndex);
-			while (_stack.size())
-			{
-				int idx = _stack.back();
-				_stack.pop_back();
-				_data[idx] &= ~MESHPOINT_PENDING; // Clear pending status
-				if (_data[idx] & (MESHPOINT_BOUNDARY | MESHPOINT_REMOVED | MESHPOINT_EDGE))
-					continue;
-				int inRange = 0;
-				if (CheckNeighbor(idx + 1))  // Right neighbor
-					inRange++;
-				if (CheckNeighbor(idx - 1))  // Left neighbor
-					inRange++;
-				if (CheckNeighbor(idx + _step)) // Below neighbor
-					inRange++;
-				if (CheckNeighbor(idx - _step)) // Above neighbor
-					inRange++;
-				if (inRange == 4)
-				{
-					_data[idx] |= MESHPOINT_REMOVED;
-					removed++;
-				}
-				else
-				{
-					_data[idx] |= MESHPOINT_EDGE;
-					edges++;
-				}
-			}
-		}
-		std::cout << removed << " removed points, " << edges << " edge points" << std::endl;
-	}
+            // For a point at sea level the tolerance is zero so that the area only contains points at sea level
+            tolerance = (low == 0) ? 0 : MeshQuantizedZ(MeshElevationToQuantized(_tolerance));
+            _stack.push_back(testIndex);
+            while (_stack.size())
+            {
+                int idx = _stack.back();
+                _stack.pop_back();
+                _data[idx] &= ~MESHPOINT_PENDING; // Clear pending status
+                if (_data[idx] & (MESHPOINT_BOUNDARY | MESHPOINT_REMOVED | MESHPOINT_EDGE))
+                    continue;
+                int inRange = 0;
+                if (CheckNeighbor(idx + 1))  // Right neighbor
+                    inRange++;
+                if (CheckNeighbor(idx - 1))  // Left neighbor
+                    inRange++;
+                if (CheckNeighbor(idx + _step)) // Below neighbor
+                    inRange++;
+                if (CheckNeighbor(idx - _step)) // Above neighbor
+                    inRange++;
+                if (inRange == 4)
+                {
+                    _data[idx] |= MESHPOINT_REMOVED;
+                    removed++;
+                }
+                else
+                {
+                    _data[idx] |= MESHPOINT_EDGE;
+                    edges++;
+                }
+            }
+        }
+        std::cout << removed << " removed points, " << edges << " edge points" << std::endl;
+    }
 }; // SimplifyFlat
 
 /*! \brief Removes points which are approximately colinear with their neighbors
@@ -505,526 +603,513 @@ private:
 class SimplifySlope : public GridSelector
 {
 public:
-	SimplifySlope(double toleranceRatio) :
-		_tolerance(toleranceRatio) {}
+    SimplifySlope(double toleranceRatio) :
+        _tolerance(toleranceRatio) {}
 
 private:
-	// Margin of error, as a fraction of the range between maximum and minimum
-	double _tolerance = 0;
-	void Process()
-	{
-		double tolerance = _tolerance;
-		if (_n <= 1 || _step <= 1)
-			return;
-		auto IsInline = [tolerance](int e1, int e2, int e3)
-		{
-			if ((e1 | e2 | e3) & MESHPOINT_REMOVED)
-				return false;
-			// Preserve shoreline edges. If a point is at sea level, it can only
-			// be removed is the neighbors are at sea level
-			e1 = MeshQuantizedZ(e1);
-			e2 = MeshQuantizedZ(e2);
-			e3 = MeshQuantizedZ(e3);
-			if (e2 == 0)
-				return e1 == 0 && e3 == 0;
-			int error = e2 - (e1 + e3) / 2;
-			int margin = (int)(tolerance * (e3 - e1));
-			if (margin < 0)
-				margin = -margin;
-			if (error < 0)
-				error = -error;
-			return error <= 100+margin;
-		};
-		int removed = 0;
-		int accepted = 0;
-		for (int y = 1; y < rows()-1; y++)
-		{
-			int* row = ptr(y);
-			int* above = ptr(y - 1);
-			int* below = ptr(y + 1);
-			for (int x = 1; x < cols() - 1; x++)
-			{
-				// There are 8 lines that combine the center pixel with the neighbor
-				// Check if the center is aligned with any of them. There must be a better way
-				if (IsInline(row[x - 1], row[x], row[x + 1]) ||
-					IsInline(above[x], row[x], below[x]) ||
-					IsInline(above[x - 1], row[x], below[x + 1]) ||
-					IsInline(above[x + 1], row[x], below[x - 1]) ||
+    // Margin of error, as a fraction of the range between maximum and minimum
+    double _tolerance = 0;
+    void Process()
+    {
+        double tolerance = _tolerance;
+        if (_n <= 1 || _step <= 1)
+            return;
+        auto IsInline = [tolerance](int e1, int e2, int e3)
+        {
+            if ((e1 | e2 | e3) & MESHPOINT_REMOVED)
+                return false;
+            // Preserve shoreline edges. If a point is at sea level, it can only
+            // be removed is the neighbors are at sea level
+            e1 = MeshQuantizedZ(e1);
+            e2 = MeshQuantizedZ(e2);
+            e3 = MeshQuantizedZ(e3);
+            if (e2 == 0)
+                return e1 == 0 && e3 == 0;
+            int error = e2 - (e1 + e3) / 2;
+            int margin = (int)(tolerance * (e3 - e1));
+            if (margin < 0)
+                margin = -margin;
+            if (error < 0)
+                error = -error;
+            return error <= 100+margin;
+        };
+        int removed = 0;
+        int accepted = 0;
+        for (int y = 1; y < rows()-1; y++)
+        {
+            int* row = ptr(y);
+            int* above = ptr(y - 1);
+            int* below = ptr(y + 1);
+            for (int x = 1; x < cols() - 1; x++)
+            {
+                // There are 8 lines that combine the center pixel with the neighbor
+                // Check if the center is aligned with any of them. There must be a better way
+                if (IsInline(row[x - 1], row[x], row[x + 1]) ||
+                    IsInline(above[x], row[x], below[x]) ||
+                    IsInline(above[x - 1], row[x], below[x + 1]) ||
+                    IsInline(above[x + 1], row[x], below[x - 1]) ||
 
-					IsInline(above[x - 1], row[x], row[x + 1]) ||
-					IsInline(below[x - 1], row[x], row[x + 1]) ||
-					IsInline(row[x - 1], row[x], above[x + 1]) ||
-					IsInline(row[x - 1], row[x], below[x + 1])
-					)
-				{
-					removed++;
-					row[x] |= MESHPOINT_REMOVED;
-				}
-				else if ((row[x] & MESHPOINT_REMOVED) == 0)
-					accepted++;
-			}
-		}
-		std::cout << removed << " colinear points, " << accepted << " remaining points" << std::endl;
-	}
+                    IsInline(above[x - 1], row[x], row[x + 1]) ||
+                    IsInline(below[x - 1], row[x], row[x + 1]) ||
+                    IsInline(row[x - 1], row[x], above[x + 1]) ||
+                    IsInline(row[x - 1], row[x], below[x + 1])
+                    )
+                {
+                    removed++;
+                    row[x] |= MESHPOINT_REMOVED;
+                }
+                else if ((row[x] & MESHPOINT_REMOVED) == 0)
+                    accepted++;
+            }
+        }
+        std::cout << removed << " colinear points, " << accepted << " remaining points" << std::endl;
+    }
 }; // SimplifySlope
 
 
 /*! \brief Removes points from a line keeping the error below a limit
  
-	The function checks how much error would be generated if the point was removed
-	and the previous and next segments were joined. If the error is less than the
-	objective the point is removed and the two segments joined.
+    The function checks how much error would be generated if the point was removed
+    and the previous and next segments were joined. If the error is less than the
+    objective the point is removed and the two segments joined.
 
-	Point N considers two segments [M,N] and [N,N+1]. The algorithm evaluates the
-	error in the range [M, N+1]
+    Point N considers two segments [M,N] and [N,N+1]. The algorithm evaluates the
+    error in the range [M, N+1]
 
-	Points which are marked as MESHPOING_EDGE are always preserved, points 
-	marked as MESHPOINT_REMOVE are always removed.
+    Points which are marked as MESHPOING_EDGE are always preserved, points 
+    marked as MESHPOINT_REMOVE are always removed.
 */
 class LineSimplifyByError : public GridSelector
 {
-	// Error allowed in the approximation
-	double _toleranceMeters = 0;
+    // Error allowed in the approximation
+    double _toleranceMeters = 0;
 
-	// Maximum spacing between preserved points. We want to keep a few points in the
-	// line to make triangulation simpler
-	static int const MAX_DISTANCE = 32;
+    // Maximum spacing between preserved points. We want to keep a few points in the
+    // line to make triangulation simpler
+    static int const MAX_DISTANCE = 32;
 
 public:
-	LineSimplifyByError(double toleranceMeters) :
-		_toleranceMeters(toleranceMeters)
-	{}
+    LineSimplifyByError(double toleranceMeters) :
+        _toleranceMeters(toleranceMeters)
+    {}
 
-	void Process()
-	{
-		int xprev = 0, xnext = 0; // index of the previous point preserved
-		int x;
-		int tolerance = MeshQuantizedZ(MeshElevationToQuantized(_toleranceMeters));
+    void Process()
+    {
+        int xprev = 0, xnext = 0; // index of the previous point preserved
+        int x;
+        int tolerance = MeshQuantizedZ(MeshElevationToQuantized(_toleranceMeters));
 
-		// Calculates the error at point X, given the current segment
-		auto ZError = [&](int x)->int
-		{
-			int zprev = Z(xprev);
-			int znext = Z(xnext);
-			// Note that the multiplication will NOT overflow because the range [xprev,xmax] is less than 32
-			int z = Z(x);
-			int error = z - (zprev + ((x - xprev) * (znext - zprev)) / (xnext - xprev));
-			return error >= 0 ? error : -error;
-		};
+        // Calculates the error at point X, given the current segment
+        auto ZError = [&](int x)->int
+        {
+            int zprev = Z(xprev);
+            int znext = Z(xnext);
+            // Note that the multiplication will NOT overflow because the range [xprev,xmax] is less than 32
+            int z = Z(x);
+            int error = z - (zprev + ((x - xprev) * (znext - zprev)) / (xnext - xprev));
+            return error >= 0 ? error : -error;
+        };
 
-		Preserve(0);
-		Preserve(_n-1);
+        Preserve(0);
+        Preserve(_n-1);
 
-		for (x = 1; x < _n-1; x++)
-		{
-			if (IsRemoved(x))
-				continue;
-			int z = Z(x);
-			int z1 = Z(x-1);
-			int z2 = Z(x+1);
-			// Preserve peaks and valleys
-			if ((z > z1 && z > z2) || (z < z1 && z < z2))
-				KeepEdge(x);
+        for (x = 1; x < _n-1; x++)
+        {
+            if (IsRemoved(x))
+                continue;
+            int z = Z(x);
+            int z1 = Z(x-1);
+            int z2 = Z(x+1);
+            // Preserve peaks and valleys
+            if ((z > z1 && z > z2) || (z < z1 && z < z2))
+                KeepEdge(x);
 
-			if (x >= xprev + MAX_DISTANCE || IsEdge(x))
-			{
-				Preserve(x);
-				xprev = x;
-				continue;
-			}
+            if (x >= xprev + MAX_DISTANCE || IsEdge(x))
+            {
+                Preserve(x);
+                xprev = x;
+                continue;
+            }
 
-			xnext = x + 1;
-			// Calculate the error for all the points in the range
-			int error = 0;
-			for (int i = x; i > xprev && error <= tolerance; i--)
-				error = ZError(x);
-			if (error <= tolerance)
-				Remove(x);
-			else
-			{
-				Preserve(x);
-				xprev = x;
-			}
-		}
-	}
+            xnext = x + 1;
+            // Calculate the error for all the points in the range
+            int error = 0;
+            for (int i = x; i > xprev && error <= tolerance; i--)
+                error = ZError(x);
+            if (error <= tolerance)
+                Remove(x);
+            else
+            {
+                Preserve(x);
+                xprev = x;
+            }
+        }
+    }
 }; // LineSimplifyByError
 
 
 /*! \brief Preserve sea level boundaries in a line
 
-	 This class keeps the points in the line points where there is a transition from sea to land
+     This class keeps the points in the line points where there is a transition from sea to land
 */
 class KeepSeaLevelInLine : public GridSelector
 {
-	// Maximum and minimum sea level
-	double _maxLevel, _minLevel;
-	void Process()
-	{
-		int low = MeshQuantizedZ(MeshElevationToQuantized(_minLevel));
-		int high = MeshQuantizedZ(MeshElevationToQuantized(_maxLevel));
-		auto InRange = [&](int x)->bool
-		{
-			int z = Z(x);
-			return (z >= low && z <= high);
-		};
+    // Maximum and minimum sea level
+    double _maxLevel, _minLevel;
+    void Process()
+    {
+        int low = MeshQuantizedZ(MeshElevationToQuantized(_minLevel));
+        int high = MeshQuantizedZ(MeshElevationToQuantized(_maxLevel));
+        auto InRange = [&](int x)->bool
+        {
+            int z = Z(x);
+            return (z >= low && z <= high);
+        };
 
-		for (int x = 1; x < _n-1; x++)
-		{
-			if (InRange(x))
-			{
-				if (!InRange(x+1))
-				{
-					Preserve(x);
-					Preserve(x+1);
+        for (int x = 1; x < _n-1; x++)
+        {
+            if (InRange(x))
+            {
+                if (!InRange(x+1))
+                {
+                    Preserve(x);
+                    Preserve(x+1);
 
-				}
-				if (!InRange(x-1))
-				{
-					Preserve(x);
-					Preserve(x-1);
-				}
-			}
-		}
-	}
+                }
+                if (!InRange(x-1))
+                {
+                    Preserve(x);
+                    Preserve(x-1);
+                }
+            }
+        }
+    }
 public: 
-	KeepSeaLevelInLine(double maxLevelMeters, double minLevelMeters) :
-		_maxLevel(maxLevelMeters),
-		_minLevel(minLevelMeters) {}
+    KeepSeaLevelInLine(double maxLevelMeters, double minLevelMeters) :
+        _maxLevel(maxLevelMeters),
+        _minLevel(minLevelMeters) {}
 };
 
 //! \brief Marks the points in a line as boundary, the corners as edges
 class BoundaryMarker : public GridSelector
 {
-	void Process()
-	{
-		for (int x = 0; x < _n; x++)
-			at(x) |= MESHPOINT_BOUNDARY;
-		at(0) |= MESHPOINT_EDGE;
-		at(_n-1) |= MESHPOINT_EDGE;
-	}
+    void Process()
+    {
+        for (int x = 0; x < _n; x++)
+            at(x) |= MESHPOINT_BOUNDARY;
+        at(0) |= MESHPOINT_EDGE;
+        at(_n-1) |= MESHPOINT_EDGE;
+    }
 };
 
 
 class TestLineSimple
 {
 public:
-	void DoTest(std::vector<double> values, std::vector<int> constraints, int step)
-	{
-		std::vector<int> elev(values.size()*step, -10000);
-		for (int i = 0; i < values.size(); i++)
-			elev[i*step] = MeshElevationToQuantized(values[i]) | MESHPOINT_BOUNDARY;
-		for (int c : constraints)
-			if (c >= 0 && c < values.size())
-				elev[c*step] |= MESHPOINT_EDGE;
-		LineSimplifyByError obj1(10);
-		obj1.Select(elev.data(), (int)elev.size(), step);
-	}
+    void DoTest(std::vector<double> values, std::vector<int> constraints, int step)
+    {
+        std::vector<int> elev(values.size()*step, -10000);
+        for (int i = 0; i < values.size(); i++)
+            elev[i*step] = MeshElevationToQuantized(values[i]) | MESHPOINT_BOUNDARY;
+        for (int c : constraints)
+            if (c >= 0 && c < values.size())
+                elev[c*step] |= MESHPOINT_EDGE;
+        LineSimplifyByError obj1(10);
+        obj1.Select(elev.data(), (int)elev.size(), step);
+    }
 
-	TestLineSimple()
-	{
-		std::vector<int> empty;
-		std::vector<int> keep1 = { 1 };
-		std::vector<int> keep2 = { 1, 3 };
-		std::vector<double>v0;
-		std::vector<double>v1 = { 1, 2, 3, 4, 5 };
-		std::vector<double>v2 = { 1, 2, 20, 4, 5 };
-		std::vector<double>v3 = { 1, 2, -20, 4, 5 };
-		DoTest(v0, empty, 1);
-		DoTest(v0, keep1, 1);
-		DoTest(v1, empty, 1);
-		DoTest(v1, keep1, 1);
-		DoTest(v1, keep2, 1);
-		DoTest(v2, empty, 1);
-		DoTest(v2, keep1, 1);
-		DoTest(v2, keep2, 1);
-		DoTest(v3, empty, 1);
-		DoTest(v3, keep1, 1);
-		DoTest(v3, keep2, 1);
-	}
+    TestLineSimple()
+    {
+        std::vector<int> empty;
+        std::vector<int> keep1 = { 1 };
+        std::vector<int> keep2 = { 1, 3 };
+        std::vector<double>v0;
+        std::vector<double>v1 = { 1, 2, 3, 4, 5 };
+        std::vector<double>v2 = { 1, 2, 20, 4, 5 };
+        std::vector<double>v3 = { 1, 2, -20, 4, 5 };
+        DoTest(v0, empty, 1);
+        DoTest(v0, keep1, 1);
+        DoTest(v1, empty, 1);
+        DoTest(v1, keep1, 1);
+        DoTest(v1, keep2, 1);
+        DoTest(v2, empty, 1);
+        DoTest(v2, keep1, 1);
+        DoTest(v2, keep2, 1);
+        DoTest(v3, empty, 1);
+        DoTest(v3, keep1, 1);
+        DoTest(v3, keep2, 1);
+    }
 };
 
 //TestLineSimple t;
 
 void DEMesher::SelectBoundary(GridSelector& processor)
 {
-	processor.Select(ptr(0),                 _qSize, 1);
-	processor.Select(ptr(0),                 _qSize, _qSize);
-	processor.Select(ptr(_qSize-1),          _qSize, 1);
-	processor.Select(ptr(0)+_qSize-1,        _qSize, _qSize);
+    processor.Select(ptr(0),                 _qSize, 1);
+    processor.Select(ptr(0),                 _qSize, _qSize);
+    processor.Select(ptr(_qSize-1),          _qSize, 1);
+    processor.Select(ptr(0)+_qSize-1,        _qSize, _qSize);
 }
 
 
-void DEMesher::Generate(const Tile &north, const Tile &east, const Tile &northEast)
+bool DEMesher::Generate(const Tile &north, const Tile &east, const Tile &northEast)
 
 {
-	if (!CheckForCDB())
-		return;
+    if (!CheckForCDB())
+        return false;
 
-	auto fileName = _root+_tile.getFilename(".tif");
-	OGRSpatialReference oSRS; // GDAL reference system
-	oSRS.SetWellKnownGeogCS("WGS84");
-	int width, height;
-	int subsample = 2;
+    auto fileName = _root+_tile.getFilename(".tif");
+    OGRSpatialReference oSRS; // GDAL reference system
+    oSRS.SetWellKnownGeogCS("WGS84");
+    {
+        // Generate the grid at half the source resolution, one additional as guard
+        _qSize = DEMCache::_tileSize+1;
+        _quantized.resize(_qSize*_qSize+1, MeshElevationToQuantized(-10000));
+        _elev.FromVector(_quantized, _qSize);
 
-	{
-		std::cout << "Center: " << fileName << std::endl;
-		elev::SimpleDEMReader reader(fileName, oSRS);
-		if (!reader.Open())
-			return;
-		width = reader.getWidth()/subsample;
-		height = reader.getHeight()/subsample;
+        // Center reader skips the NORTH edge
+        if (!CopyGrid(_tile, 0, 1))
+        {
+            _quantized.resize(0);
+            _elev.FromVector(_quantized, _qSize);
+            return false;
+        }
+;
+        // Copy the missing top and left edges
+        for (int i = 0; i < _qSize; i++)
+        {
+            ptr(0)[i] = ptr(1)[i];
+            ptr(i)[_qSize - 1] = ptr(i)[_qSize - 2];
+            ptr(i)[_qSize - 1] = ptr(i)[_qSize - 2];
+        }
+        ptr(0)[_qSize - 1] = ptr(0)[_qSize - 2];
 
-		// Generate the grid at half the source resolution, one additional as guard
-		_qSize = std::min(width, height) + 1;
-		_quantized.resize(_qSize * (_qSize+1), MeshElevationToQuantized(-10000));
-		// Center reader skips the NORTH edge
-		CopyGrid(reader,0,1,subsample);
-		// Copy the missing top and left edges
-		for (int i = 0; i < _qSize; i++)
-		{
-			ptr(0)[i] = ptr(1)[i];
-			ptr(i)[_qSize - 1] = ptr(i)[_qSize - 2];
-		}
-		ptr(0)[_qSize - 1] = ptr(0)[_qSize - 2];
-	}
-	fileName = _root + north.getFilename(".tif");
-	if (ccl::fileExists(fileName))
-	{
-		std::cout << "North: " << fileName << std::endl;
-		elev::SimpleDEMReader reader(fileName, oSRS);
-		if (reader.Open())
-			// Copy the top-most row
-			CopyGrid(reader,0,-height+1,subsample);
-	}
-	fileName = _root + east.getFilename(".tif");
-	if (ccl::fileExists(fileName))
-	{
-		std::cout << "East: " << fileName << std::endl;
-		elev::SimpleDEMReader reader(fileName, oSRS);
-		if (reader.Open())
-			// Copy the right-most column
-			CopyGrid(reader,width,1,subsample);
-	}
-	fileName = _root + northEast.getFilename(".tif");
-	if (ccl::fileExists(fileName))
-	{
-		std::cout << "NorthEast: " << fileName << std::endl;
-		elev::SimpleDEMReader reader(fileName, oSRS);
-		if (reader.Open())
-			// Copy the top-right corner
-			CopyGrid(reader,width,-height+1,subsample);
-	}
-	
-	BoundaryMarker marker;
-	SelectBoundary(marker);
+        // Copy the top-most row
+        CopyGrid(north, 0, -(_qSize-2));
 
-	double tolerance = 20;
-	double seaLevel = 0;
-	// Run the mesh simplification and the sea level detail on the boundary
-	LineSimplifyByError simplify(tolerance / 2);
-	KeepSeaLevelInLine forceSeaLevel(seaLevel, seaLevel);
-	SelectBoundary(simplify);
-	SelectBoundary(forceSeaLevel);
+        // Copy the right-most column
+        CopyGrid(east, _qSize-1, 1);
 
-	SimplifyFlat mesher(tolerance);
-	mesher.Select(_quantized.data(), _qSize, _qSize);
-	SimplifySlope flattener(0.2);
-	flattener.Select(_quantized.data(), _qSize, _qSize);
+        // Copy the top-right corner
+        CopyGrid(northEast, _qSize-1, -(_qSize-2));
+    }
+    
+    BoundaryMarker marker;
+    SelectBoundary(marker);
 
+    double tolerance = 20;
+    double seaLevel = 0;
+    // Run the mesh simplification and the sea level detail on the boundary
+    LineSimplifyByError simplify(tolerance / 2);
+    KeepSeaLevelInLine forceSeaLevel(seaLevel, seaLevel);
+    SelectBoundary(simplify);
+    SelectBoundary(forceSeaLevel);
+
+    SimplifyFlat mesher(tolerance);
+    mesher.Select(_quantized.data(), _qSize, _qSize);
+    SimplifySlope flattener(0.2);
+    flattener.Select(_quantized.data(), _qSize, _qSize);
+    return true;
 }
 
-void DEMesher::SetSceneAttributes(scenegraph::Scene* scene)
+void SetSceneAttributes(scenegraph::Scene* scene, const std::string &name, const CoordinatesRange &location)
 {
-	if (!scene)
-		return;
-	scene->name = _tile.getFilename("");
-	scene->attributes.setAttribute("terrain", true);
-	auto sw = _tile.getCoordinates().low();
-	auto ne = _tile.getCoordinates().high();
-	scene->attributes.setAttribute("origin_lat", sw.latitude().value());
-	scene->attributes.setAttribute("origin_lon", sw.longitude().value());
-	scene->attributes.setAttribute("sw_lat", sw.latitude().value());
-	scene->attributes.setAttribute("sw_lon", sw.longitude().value());
-	scene->attributes.setAttribute("ne_lat", ne.latitude().value());
-	scene->attributes.setAttribute("ne_lon", ne.longitude().value());
+    if (!scene)
+        return;
+    scene->name = name;
+    scene->attributes.setAttribute("terrain", true);
+    auto sw = location.low();
+    auto ne = location.high();
+    scene->attributes.setAttribute("origin_lat", sw.latitude().value());
+    scene->attributes.setAttribute("origin_lon", sw.longitude().value());
+    scene->attributes.setAttribute("sw_lat", sw.latitude().value());
+    scene->attributes.setAttribute("sw_lon", sw.longitude().value());
+    scene->attributes.setAttribute("ne_lat", ne.latitude().value());
+    scene->attributes.setAttribute("ne_lon", ne.longitude().value());
 }
 
 
 /*! \brief Saves the triangulated mesh into the scene
 
-	The points in the DEM elevation grid that are preserved make a triangle mesh. The boundary
-	of the grid is a constraint so that all the edges are included.
+    The points in the DEM elevation grid that are preserved make a triangle mesh. The boundary
+    of the grid is a constraint so that all the edges are included.
 
-	The mesh becomes a Face in the scene. The (X,Y) coordinates are Y pointing up, the expectation 
-	is that the scene matrix will set the right orientation.
+    The mesh becomes a Face in the scene. The (X,Y) coordinates are Y pointing up, the expectation 
+    is that the scene matrix will set the right orientation.
 */
 void DEMesher::Triangulate(scenegraph::Scene* scene, sfa::Point origin)
 {
-	// The boundary rectangle is counterclockwise, but on a 'normal' (Y up) axis
-	// the best way to build it is: (xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)
-	int* top = ptr(0);
-	int* bottom = ptr(_qSize - 1);
-	ctl::PointList boundary{ 
-		ctl::Point(       -1,        -1, MeshQuantizedToElevation(top[0])),
-		ctl::Point(_qSize,        -1, MeshQuantizedToElevation(top[_qSize-1])), 
-		ctl::Point(_qSize, _qSize, MeshQuantizedToElevation(bottom[_qSize-1])), 
-		ctl::Point(-1,        _qSize, MeshQuantizedToElevation(bottom[0])) 
-	};
+    if (!IsGenerated())
+        return;
+    auto sw = _tile.getCoordinates().low();
+    cts::FlatEarthProjection projection(sw.latitude().value(), sw.longitude().value());
+    auto ne = _tile.getCoordinates().high();
+    double scaleX = projection.convertGeoToLocalX(ne.longitude().value());
+    double scaleY = projection.convertGeoToLocalY(ne.latitude().value());
 
-	ctl::DelaunayTriangulation dt(boundary);
+    // The boundary rectangle is counterclockwise, but on a 'normal' (Y up) axis
+    // the best way to build it is: (xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)
+    ctl::PointList boundary{ 
+        ctl::Point(       -1,        -1, MeshQuantizedToElevation(_elev.at(0,0))),
+        ctl::Point(_qSize,        -1, MeshQuantizedToElevation(_elev.at(0,_qSize-1))), 
+        ctl::Point(_qSize, _qSize, MeshQuantizedToElevation(_elev.at(_qSize-1,_qSize-1))), 
+        ctl::Point(-1,        _qSize, MeshQuantizedToElevation(_elev.at(_qSize-1,0))) 
+    };
 
-	// All the points that have not been removed are constraints
+    ctl::DelaunayTriangulation dt(boundary);//, 5000, 1e-6, 3e-5, 10000, 0);
 
-	// First, insert the constrainted outside contour
-	std::vector<ctl::Point> contour;
+    // All the points that have not been removed are constraints
 
-	// The coordinate system for the display has the origin on the bottom-right, but the images have the
-	// origin at the top-left.
-	auto ScenePoint = [&](int x, int y, int altitude)->ctl::Point
-	{
-		return ctl::Point(x, _qSize-y-1, MeshQuantizedToElevation(altitude));
-	};
+    // First, insert the constrainted outside contour
+    std::vector<ctl::Point> contour;
 
-	auto AddToContour = [&](int x, int y)
-	{
-		int altitude = ptr(y)[x];
-		if ((altitude & MESHPOINT_REMOVED) == 0)
-			contour.push_back(ScenePoint(x,y,altitude));
-	};
-	int x=0, y=0;
-	for (; x < _qSize - 1; x++)
-		AddToContour(x, y);
-	for (; y < _qSize-1; y++)
-		AddToContour(x, y);
-	for (; x>0; x--)
-		AddToContour(x, y);
-	// Note that the first point is repeated at the end
-	for (; y>=0; y--)
-		AddToContour(x, y);
+    // The coordinate system for the display has the origin on the bottom-right, but the images have the
+    // origin at the top-left.
+    auto ScenePoint = [&](int x, int y, int altitude)->ctl::Point
+    {
+        return ctl::Point(x, _qSize-y-1, MeshQuantizedToElevation(altitude));
+    };
 
-	int failedPoints = 0;
-	if (!dt.InsertConstrainedLineString(contour))
-		failedPoints = (int)contour.size();
-	int insertedPoints = (int)contour.size();
-	for (y=1; y<_qSize-1; y++)
-		for (x = 1; x < _qSize-1; x++)
-		{
-			int altitude = ptr(y)[x];
-			if ((altitude & MESHPOINT_REMOVED) == 0) //REVISIT: Removed all points
-			{
-				insertedPoints++;
-				if (dt.InsertConstrainedPoint(ScenePoint(x,y,altitude)) == 0)
-					failedPoints++;
-			}
-		}
-	std::vector<ctl::Edge*> edges;
-	edges = dt.GatherTriangles(ctl::PointList());
-	ctl::TIN container(&dt, edges);
-	int nominalTileSize = 1024;
-	int subsample = nominalTileSize / (_qSize-1);
-	int useTexture = true;
-	if (scene)
-	{
-		scene->hasVertexNormals = true;
-		scene->name = _tile.getFilename();
-		scene->faces.emplace_back();
-		scenegraph::Face& face = scene->faces.back();
-		face.primaryColor = scenegraph::Color((double)_faceRGB[0]/255.0, (double)_faceRGB[1]/255.0,(double)_faceRGB[2]/255.0);
-		face.alternateColor = face.primaryColor;
+    auto AddToContour = [&](int x, int y)
+    {
+        int altitude = ptr(y)[x];
+        if ((altitude & MESHPOINT_REMOVED) == 0)
+            contour.push_back(ScenePoint(x,y,altitude));
+    };
+    int x=0, y=0;
+    for (; x < _qSize - 1; x++)
+        AddToContour(x, y);
+    for (; y < _qSize-1; y++)
+        AddToContour(x, y);
+    for (; x>0; x--)
+        AddToContour(x, y);
+    // Note that the first point is repeated at the end
+    for (; y>=0; y--)
+        AddToContour(x, y);
 
-		Tile imageTile = _tile;
-		imageTile.setDataset(Dataset::Imagery);
-		std::string imageName = ccl::joinPaths(_root, imageTile.getFilename(".jp2"));
+    int failedPoints = 0;
+    if (!dt.InsertConstrainedLineString(contour))
+        failedPoints = (int)contour.size();
+    int insertedPoints = (int)contour.size();
+    for (y=1; y<_qSize-1; y++)
+        for (x = 1; x < _qSize-1; x++)
+        {
+            int altitude = ptr(y)[x];
+            if ((altitude & MESHPOINT_REMOVED) == 0)
+            {
+                insertedPoints++;
+                if (dt.InsertConstrainedPoint(ScenePoint(x,y,altitude)) == 0)
+                    failedPoints++;
+            }
+        }
+    std::vector<ctl::Edge*> edges;
+    edges = dt.GatherTriangles(ctl::PointList());
+    ctl::TIN container(&dt, edges);
+    int nominalTileSize = 1024;
+    int subsample = nominalTileSize / (_qSize-1);
+    int useTexture = true;
+    if (scene)
+    {
+        SetSceneAttributes(scene, _tile.getFilename(""), _tile.getCoordinates());
+        scene->hasVertexNormals = true;
+        scene->faces.emplace_back();
+        scenegraph::Face& face = scene->faces.back();
+        face.primaryColor = scenegraph::Color((double)_faceRGB[0]/255.0, (double)_faceRGB[1]/255.0,(double)_faceRGB[2]/255.0);
+        face.alternateColor = face.primaryColor;
 
-		scenegraph::MappedTexture* texture = nullptr;
-		
-		if (useTexture && ccl::fileExists(imageName))
-		{
-			std::cout << "Image tile " << nominalTileSize << ": " << imageName << std::endl;
-			face.textures.emplace_back();
-			texture = &(face.textures.back());
-			texture->SetTextureName(imageName);
-			nominalTileSize /= subsample;
-		}
+        Tile imageTile = _tile;
+        imageTile.setDataset(Dataset::Imagery);
+        std::string imageName = ccl::joinPaths(_root, imageTile.getFilename(".jp2"));
 
-		bool success = true;
-		auto &verts = container.verts;
-		auto &normals = container.normals;
+        scenegraph::MappedTexture* texture = nullptr;
+        
+        if (useTexture && ccl::fileExists(imageName))
+        {
+            std::cout << "Image tile " << nominalTileSize << ": " << imageName << std::endl;
+            face.textures.emplace_back();
+            texture = &(face.textures.back());
+            texture->SetTextureName(imageName);
+            nominalTileSize /= subsample;
+        }
 
-		// Indexes of the corners. The last entry always contains the last enumerated corner.
-		int corners[4] = { -1,-1,-1,-1 };
-		int numPoints = 0;
-		int numCorners = 0;
-		for (int i=0; i<verts.size(); i++)
-		{
-			ctl::Point v = verts[i];
-			if (v.x < 0 || v.x >= _qSize)
-			{
-				if (numCorners<4)
-					corners[numCorners] = corners[3] = numPoints;
-				numCorners++;
-			}
-			face.addVert(sfa::Point(v.x*subsample, v.y*subsample, v.z)+origin);
-			face.vertexNormals.push_back(sfa::Point(normals[i].x, normals[i].y, normals[i].x));
-			if (texture)
-				texture->uvs.push_back(sfa::Point(v.x/nominalTileSize, v.y/nominalTileSize));
-			numPoints++;
-		}
+        bool success = true;
+        auto &verts = container.verts;
+        auto &normals = container.normals;
 
-		int numTriangles = 0;
-		auto triangles = container.triangles;
-		auto IsCorner = [&](int index)->bool { return index<=corners[3] && (index==corners[3] || index == corners[0] || index == corners[1] || index == corners[2]); };
-		for (size_t i = 0; i+2 < triangles.size(); i += 3)
-		{
-			if (!IsCorner(triangles[i]) && !IsCorner(triangles[i+1]) && !IsCorner(triangles[i+2]))
-			{
-				success = success && face.AddFacet(triangles[i+0], triangles[i+1], triangles[i+2]);
-				++numTriangles;
-			}
-		}
-		
-		// Add a new face with blue color that marks the sea level
-		if (numCorners >= 4 && _addSeaLevel)
-		{
-			scene->faces.emplace_back();
-			scenegraph::Face& seaSurface = scene->faces.back();
-			seaSurface.primaryColor = scenegraph::Color(0.3, 0.3f, 1.0f);
-			seaSurface.alternateColor = scenegraph::Color(0.3f, 0.3f, 1.0f);
-			for (int c = 0; c < 4; c++)
-			{
-				ctl::Point v = verts[corners[c]];
-				// Corner altitude just above zero so that the surface hides the mesh below
-				v.z = 0.001;
-				if (v.x < 0) v.x = 0;
-				if (v.x >= _qSize) v.x = _qSize - 1;
-				if (v.y < 0) v.y = 0;
-				if (v.y >= _qSize) v.y = _qSize - 1;
-				seaSurface.addVert(sfa::Point(v.x*subsample, v.y*subsample, v.z)+origin);
-				seaSurface.vertexNormals.push_back(sfa::Point(0, 0, 1));
-			}
-			success = success && seaSurface.AddFacet(0, 1, 2);
-			success = success && seaSurface.AddFacet(0, 2, 3);
-		}
+        // Indexes of the corners. The last entry always contains the last enumerated corner.
+        int corners[4] = { -1,-1,-1,-1 };
+        int numPoints = 0;
+        int numCorners = 0;
+        for (int i=0; i<verts.size(); i++)
+        {
+            ctl::Point v = verts[i];
+            if (v.x < 0 || v.x >= _qSize)
+            {
+                if (numCorners<4)
+                    corners[numCorners] = corners[3] = numPoints;
+                numCorners++;
+            }
+            face.addVert(sfa::Point(v.x*subsample, v.y*subsample, v.z)+origin);
+            face.vertexNormals.push_back(sfa::Point(normals[i].x, normals[i].y, normals[i].x));
+            if (texture)
+                texture->uvs.push_back(sfa::Point(v.x/nominalTileSize, v.y/nominalTileSize));
+            numPoints++;
+        }
+
+        int numTriangles = 0;
+        auto triangles = container.triangles;
+        auto IsCorner = [&](int index)->bool { return index<=corners[3] && (index==corners[3] || index == corners[0] || index == corners[1] || index == corners[2]); };
+        for (size_t i = 0; i+2 < triangles.size(); i += 3)
+        {
+            if (!IsCorner(triangles[i]) && !IsCorner(triangles[i+1]) && !IsCorner(triangles[i+2]))
+            {
+                success = success && face.AddFacet(triangles[i+0], triangles[i+1], triangles[i+2]);
+                ++numTriangles;
+            }
+        }
+        
+        // Add a new face with blue color that marks the sea level
+        if (numCorners >= 4 && _addSeaLevel)
+        {
+            scene->faces.emplace_back();
+            scenegraph::Face& seaSurface = scene->faces.back();
+            seaSurface.primaryColor = scenegraph::Color(0.3, 0.3f, 1.0f);
+            seaSurface.alternateColor = scenegraph::Color(0.3f, 0.3f, 1.0f);
+            for (int c = 0; c < 4; c++)
+            {
+                ctl::Point v = verts[corners[c]];
+                // Corner altitude just above zero so that the surface hides the mesh below
+                v.z = 0.001;
+                if (v.x < 0) v.x = 0;
+                if (v.x >= _qSize) v.x = _qSize - 1;
+                if (v.y < 0) v.y = 0;
+                if (v.y >= _qSize) v.y = _qSize - 1;
+                seaSurface.addVert(sfa::Point(v.x*subsample, v.y*subsample, v.z)+origin);
+                seaSurface.vertexNormals.push_back(sfa::Point(0, 0, 1));
+            }
+            success = success && seaSurface.AddFacet(0, 1, 2);
+            success = success && seaSurface.AddFacet(0, 2, 3);
+        }
 
 
-		if (!success)
-			std::cout << "Cannot save the mesh" << std::endl;
-		else
-			std::cout << "Generated mesh: " << numPoints << " points and " << numTriangles << " facets" << std::endl;
-	}
+        if (!success)
+            std::cout << "Cannot save the mesh" << std::endl;
+        else
+            std::cout << "Generated mesh: " << numPoints << " points and " << numTriangles << " facets" << std::endl;
+    }
 
 }
 
 
 void AddTextureImage(const std::string& imageName, int imageSize, scenegraph::Face* face)
 {
-	face->textures.emplace_back();
+    face->textures.emplace_back();
     scenegraph::MappedTexture &mt = face->textures.back();
     mt.SetTextureName(imageName);
     for (size_t i = 0; i<face->getNumVertices(); i++)
     {
-		auto& v = face->verts[i];
-		// Since the image covers the tile the calculations are trivial
+        auto& v = face->verts[i];
+        // Since the image covers the tile the calculations are trivial
         mt.uvs.push_back(sfa::Point(v.X()/imageSize, v.Y()/imageSize));
     }
 
@@ -1033,78 +1118,94 @@ void AddTextureImage(const std::string& imageName, int imageSize, scenegraph::Fa
 // Returns the tile at a certain coordinate, with the tiles North and West
 void FindTiles(std::vector<Tile>& tiles, const Tile& target, Tile& north, Tile& east, Tile &northEast)
 {
-	Latitude southLat = target.getCoordinates().low().latitude();
-	Longitude westLng = target.getCoordinates().low().longitude();
-	Latitude northLat = target.getCoordinates().high().latitude();
-	Longitude eastLng = target.getCoordinates().high().longitude();
-	for (auto& t : tiles)
-	{
-		auto low = t.getCoordinates().low();
-		auto high = t.getCoordinates().high();
-		if (low.latitude() == northLat && low.longitude()==westLng)
-			north = t;
-		else if (low.latitude()==southLat && low.longitude() == eastLng)
-			east = t;
-		else if (low.latitude()==northLat && low.longitude() == eastLng)
-			northEast = t;
-	}
+    Latitude southLat = target.getCoordinates().low().latitude();
+    Longitude westLng = target.getCoordinates().low().longitude();
+    Latitude northLat = target.getCoordinates().high().latitude();
+    Longitude eastLng = target.getCoordinates().high().longitude();
+    for (auto& t : tiles)
+    {
+        auto low = t.getCoordinates().low();
+        auto high = t.getCoordinates().high();
+        if (low.latitude() == northLat && low.longitude()==westLng)
+            north = t;
+        else if (low.latitude()==southLat && low.longitude() == eastLng)
+            east = t;
+        else if (low.latitude()==northLat && low.longitude() == eastLng)
+            northEast = t;
+    }
 
 }
 
 int main(int argc, char **argv)
 {
-	cognitics::gdal::init(argv[0]);
-	char const* cdb = "C:/ocb/CDB_Yemen_4.0.0";
-	int LOD = 6;
-	double increment = 2.0 / (2 << LOD);
-	//Coordinates target(12.75, 45);
-	//Coordinates target(12.75, 44.97);
-	Coordinates target(12.78, 45.043);
-	CoordinatesRange corner(target.longitude().value()-increment, target.longitude().value()+increment,
-		target.latitude().value()-increment, target.latitude().value()+increment);
-	auto tiles = generate_tiles(corner, Dataset::Elevation, LOD);
+    cognitics::gdal::init(argv[0]);
+    char const* cdb = "C:/ocb/CDB_Yemen_4.0.0";
+    int LOD = 6;
+    double increment = 2.0 / (2 << LOD);
+    //Coordinates target(12.75, 45);
+    //Coordinates target(12.75, 44.97);
+    Coordinates target(12.78, 45.043);
+    CoordinatesRange corner(target.longitude().value()-increment, target.longitude().value()+increment,
+        target.latitude().value()-increment, target.latitude().value()+increment);
+    auto tiles = generate_tiles(corner, Dataset::Elevation, LOD);
 
-	auto centerTiles = generate_tiles(CoordinatesRange(target, target), Dataset::Elevation, LOD);
-	std::unique_ptr<scenegraph::Scene> scene(new scenegraph::Scene());
-	scene.get()->name = centerTiles[0].Filename();
-	auto origin = centerTiles[0].getCoordinates().low();
+    auto centerTiles = generate_tiles(CoordinatesRange(target, target), Dataset::Elevation, LOD);
+    std::unique_ptr<scenegraph::Scene> scene(new scenegraph::Scene());
+    scene.get()->name = centerTiles[0].Filename();
+    auto fullArea = centerTiles[0].getCoordinates();
+    auto origin = centerTiles[0].getCoordinates().low();
+    
 
+    std::string timing;
     auto ts_start = std::chrono::steady_clock::now();
 
+    for (Tile current : tiles)
+    {
 
-	for (Tile& current : tiles)
-	{
-		Tile north, east, northEast;
-		FindTiles(tiles, current, north, east, northEast);
-		double displacementY = current.getCoordinates().low().latitude().value() - origin.latitude().value();
-		double displacementX = current.getCoordinates().low().longitude().value() - origin.longitude().value();
-		// At LOD=0 the tile displacement is 1 degree. Convert to tile units
+        Tile north, east, northEast;
+        FindTiles(tiles, current, north, east, northEast);
+        double displacementY = current.getCoordinates().low().latitude().value() - origin.latitude().value();
+        double displacementX = current.getCoordinates().low().longitude().value() - origin.longitude().value();
+        // At LOD=0 the tile displacement is 1 degree. Convert to tile units
 
-		sfa::Point offset(displacementX * (1024 << LOD), displacementY * (1024 << LOD));
-		DEMesher test(cdb, current);
-		test.Generate(north, east, northEast);
-		std::cout << "Origin: " << offset.X() << "  " << offset.Y() << std::endl;
-		scenegraph::Scene* tileScene = new scenegraph::Scene(scene.get());
-		test.Triangulate(tileScene, offset);
-	}
+        sfa::Point offset(displacementX * (1024 << LOD), displacementY * (1024 << LOD));
+        DEMesher test(cdb, current);
+        if (!test.Generate(north, east, northEast))
+            continue;
+        fullArea.Expand(current.getCoordinates().low());
+        fullArea.Expand(current.getCoordinates().high());
+        std::cout << "Origin: " << offset.X() << "  " << offset.Y() << std::endl;
+        scenegraph::Scene* tileScene = new scenegraph::Scene(scene.get());
+        auto trstart = std::chrono::steady_clock::now();
+        test.Triangulate(tileScene, offset);
+        auto trstop = std::chrono::steady_clock::now();
+        double time = std::chrono::duration<double>(trstop - trstart).count();
+        timing = timing + std::to_string(time) + ",";
+        std::cout<< (">>>>>triangulation: "+std::to_string(time)+" seconds")<<std::endl;
+    }
     auto ts_stop = std::chrono::steady_clock::now();
-	double time = std::chrono::duration<double>(ts_stop - ts_start).count();
-    std::cout<< ("runtime: " + std::to_string(tiles.size()/time)+" tiles/second");
+    double time = std::chrono::duration<double>(ts_stop - ts_start).count();
+    std::cout<< ("runtime: " + std::to_string(tiles.size()/time)+" tiles/second")<<std::endl;
+    std::cout << "time = " << timing << std::endl;
 
+    SetSceneAttributes(scene.get(), "Master scene", fullArea);
 
-	scenegraph::buildOpenFlightFromScene("c:/build/temp/terrain.flt", scene.get());
+    std::string outputFileName = "c:/build/temp/terrain" + std::to_string(LOD) + ".flt";
+
+    std::cout << "File: " << outputFileName << std::endl;
+    scenegraph::buildOpenFlightFromScene(outputFileName, scene.get());
 //	AddTextureImage("N12E045_D004_S001_T001_L06_U49_R2.jp2", 512, &(scene.get()->faces[0]));
-	return 0;
+    return 0;
 
 
-	for (double s =89; s<=90; s+=0.1)
-		for (double e = 44; e <= 48.1; e += 0.1)
-		{
-			DEMesher  mesher(cdb,s,e,3);
-			std::cout << "A: "<< mesher.TargetTile().getFilename("tif") << std::endl;
-			CoordinatesRange corner(e,e+0.0001,s,s+0.0001);
-			auto list = generate_tiles(corner, mesher.TargetTile().getDataset(), 3);
-			std::cout << "B: "<< list[0].getFilename() << std::endl;
+    for (double s =89; s<=90; s+=0.1)
+        for (double e = 44; e <= 48.1; e += 0.1)
+        {
+            DEMesher  mesher(cdb,s,e,3);
+            std::cout << "A: "<< mesher.TargetTile().getFilename("tif") << std::endl;
+            CoordinatesRange corner(e,e+0.0001,s,s+0.0001);
+            auto list = generate_tiles(corner, mesher.TargetTile().getDataset(), 3);
+            std::cout << "B: "<< list[0].getFilename() << std::endl;
 
-		}
+        }
 }
