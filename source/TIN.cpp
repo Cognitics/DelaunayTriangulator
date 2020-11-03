@@ -83,11 +83,11 @@ namespace ctl {
 	void TIN::CreateFromDT(DelaunayTriangulation* DT, const std::vector<Edge*> &triangle_edges)
 	{
 		const Subdivision* graph = DT->GetSubdivision();
-		verts.resize(graph->getMaxVerts());
-		normals.resize(graph->getMaxVerts());
+		verts.resize(graph->getNumVerts());
+		normals.resize(graph->getNumVerts());
 
 		ID invalid = graph->getMaxEdges();
-		IDList VertexIDMap(invalid,invalid);
+		IDList VertexIDMap(graph->getNumEdges(),invalid);
 
 		int nextIndex = 0;
 		for (unsigned int i = 0 ; i < triangle_edges.size(); i++)

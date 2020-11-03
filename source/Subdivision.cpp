@@ -23,34 +23,32 @@ THE SOFTWARE.
 
 namespace ctl {
 
-//!	Allocate more memory for Vertices
+//!    Allocate more memory for Vertices
 	void Subdivision::allocVerts(void)
 	{
 		int start = int(verts.size());
 		Block<Vertex>* _verts = new Block<Vertex>(resizeIncriment);
 		verts.PushBlock(_verts);
+		vertFlags.resize(start + resizeIncriment, false);
 		
-		for (unsigned int i = 0; i < _verts->size; i++)
-		{
-			vertFlags.push_back(false);
+		for (unsigned int i = 0; i < resizeIncriment; i++)
 			_verts->data[i].id = start + i;
-		}
 	}
 
-//!	Allocate more memory for Edges
+//!    Allocate more memory for Edges
 	void Subdivision::allocEdges(void)
 	{
 		int start = getMaxEdges();
 		Block<Edge>* _edges = new Block<Edge>(4*resizeIncriment);
 		edges.PushBlock(_edges);
+		edgeFlags.resize(start + resizeIncriment, false);
 
 		for (size_t i = 0; i < resizeIncriment; i++)
 		{
-			edgeFlags.push_back(false);
-			_edges->data[ 4*i + 0 ].id = start + i;
-			_edges->data[ 4*i + 1 ].id = start + i;
-			_edges->data[ 4*i + 2 ].id = start + i;
-			_edges->data[ 4*i + 3 ].id = start + i;
+			_edges->data[ 4*i + 0 ].id = static_cast<ID>(start + i);
+			_edges->data[ 4*i + 1 ].id = static_cast<ID>(start + i);
+			_edges->data[ 4*i + 2 ].id = static_cast<ID>(start + i);
+			_edges->data[ 4*i + 3 ].id = static_cast<ID>(start + i);
 			_edges->data[ 4*i + 0 ].num = 0;
 			_edges->data[ 4*i + 1 ].num = 1;
 			_edges->data[ 4*i + 2 ].num = 2;
@@ -80,9 +78,9 @@ namespace ctl {
 
 	Vertex* Subdivision::getRandomVertex(void)
 	{
-		if (getNumVerts() == 0) return NULL;
+		int max = getNumVerts();
+		if (max == 0) return NULL;
 
-		int max = getMaxVerts();
 		int n = rand()%max;
 		for (int i = 0; i < max; i++)
 		{
@@ -140,9 +138,9 @@ namespace ctl {
 
 	Edge* Subdivision::getRandomEdge(void)
 	{
-		if (getNumEdges() == 0) return NULL;
+		int max = getNumEdges();
+		if (max == 0) return NULL;
 
-		int max = getMaxEdges();
 		int n = rand()%max;
 		for (int i = 0; i < max; i++)
 		{
@@ -202,17 +200,17 @@ namespace ctl {
 	void Subdivision::Splice(Edge* a, Edge* b)
 	{
 		Edge* alpha = a->Onext()->Rot();
-		Edge* beta	= b->Onext()->Rot();
+		Edge* beta    = b->Onext()->Rot();
 
 		Edge* temp1 = b->Onext();
 		Edge* temp2 = a->Onext();
 		Edge* temp3 = beta->Onext();
 		Edge* temp4 = alpha->Onext();
 
-		a->next		= temp1;
-		b->next		= temp2;
+		a->next        = temp1;
+		b->next        = temp2;
 		alpha->next = temp3;
-		beta->next	= temp4;
+		beta->next    = temp4;
 	}
 
 }
