@@ -348,7 +348,7 @@ public:
         return ccl::directoryExists(_root);
     }
 
-    bool Generate(const Tile &north, const Tile &east, const Tile &northEast);
+    bool Generate();
 
     void Triangulate(scenegraph::Scene* saved);
 
@@ -380,6 +380,9 @@ public:
 
     static std::vector<int> *GetGrid(const Tile &tile, const std::string& cdbRoot);
     static void FreeGrid(const Tile& tile);
+
+private:
+    static std::vector<int> *ReplaceGrid(const Tile &tile, const std::string& cdbRoot);
     
 };
 
@@ -396,15 +399,54 @@ void DEMCache::FreeGrid(const Tile &tile)
         elevationCache.erase(range);
     }
 }
+//! \brief Generates a replacement for the elevation grid from a tile with lower LOD
+std::vector<int>* DEMCache::ReplaceGrid(const Tile& tile, const std::string& cdbRoot)
+{
+    // Finding the parent tile is not a trivial affair
+    LOD newLOD(tile.getLod() - 1);
+    if (newLOD.dimensions() <= 4)
+        return nullptr;
+
+    auto higherTile = generate_tiles(tile.getCoordinates(), tile.getDataset(), newLOD);
+    assert(higherTile.size() == 1);
+    auto highGrid = GetGrid(higherTile[0], cdbRoot);
+    if (!highGrid)
+        return nullptr;
+    // Now, take one of the four quadrants, and resample by interpolation
+    int xoffset = 0, yoffset = 0;
+    if (higherTile[0].getCoordinates().low().latitude() == tile.getCoordinates().low().latitude())
+        yoffset = _tileSize / 2; // Quadrant at the bottom
+    if (higherTile[0].getCoordinates().low().longitude() < tile.getCoordinates().low().longitude())
+        xoffset = _tileSize / 2; // Quadrant to the right
+    std::cout << "Replace with: " << higherTile[0].getFilename(".tif")<<"offsets: " << xoffset<< " "<< yoffset << std::endl;
+
+    std::vector<int>* grid = new std::vector<int>(_tileSize * _tileSize);
+
+    for (int x = 0; x < _tileSize; x += 2)
+        for (int y = 0; y < _tileSize; y += 2)
+        {
+            int srcIndex = ((y/2)+yoffset) * _tileSize + x/2 + xoffset;
+            int left = (*highGrid)[srcIndex];
+            int right = left;
+            int bottom = left;
+            if (x/2+xoffset+1 < _tileSize)
+                right = (*highGrid)[srcIndex + 1];
+            if (y/2+yoffset+1 < _tileSize)
+                bottom = (*highGrid)[srcIndex + _tileSize];
+            if (left == 0 && right > 100000)
+                std::cout << "Check out\n";
+            int dstIndex = y * _tileSize + x;
+            (*grid)[dstIndex] = left;
+            (*grid)[dstIndex+1] = (left+right) / 2;
+            (*grid)[dstIndex+_tileSize] = (left+bottom) / 2;
+            (*grid)[dstIndex+_tileSize+1] = (right+bottom) / 2;
+        }
+    return grid;
+}
+
 
 std::vector<int> * DEMCache::GetGrid(const Tile& tile, const std::string& cdbRoot)
 {
-    std::string fileName = cdbRoot+tile.getFilename(".tif");
-    if (!ccl::fileExists(fileName))
-    {
-        // Finding the parent tile is not a trivial affair
-        CoordinatesRange();
-    }
     auto range = tile.getFilename(".tif");
     auto found = elevationCache.find(range);
     if (found != elevationCache.end())
@@ -413,6 +455,14 @@ std::vector<int> * DEMCache::GetGrid(const Tile& tile, const std::string& cdbRoo
         if (grid->size() == _tileSize * _tileSize)
             return grid;
         FreeGrid(tile);
+    }
+    std::string fileName = cdbRoot+range;
+    if (!ccl::fileExists(fileName))
+    {
+       auto newGrid =  ReplaceGrid(tile, cdbRoot);
+       if (newGrid)
+           elevationCache[range] = newGrid;
+       return newGrid;
     }
 
     OGRSpatialReference oSRS; // GDAL reference system
@@ -479,15 +529,15 @@ void DEMesher::SaveQuantized(const char* fileName)
 //       relative to the tile grid. They can be negative
 bool DEMesher::CopyGrid(const Tile &source, int x, int y)
 {
-    if (source.getDataset().code() == Dataset::Invalid);
+    if (source.getDataset().code() == Dataset::Invalid)
         return false;
     auto grid = DEMCache::GetGrid(source, _root);
     if (!grid)
     {
-        std::cout << "Missing: " << source.getFilename() << std::endl;
+        std::cout << "Missing: " << source.getFilename(".tif") << std::endl;
         return false;
     }
-    std::cout << "File: " << source.getFilename() << std::endl;
+    std::cout << "File: " << source.getFilename(".tif") << std::endl;
 
     int gridSize = _qSize - 1;
     int srcx = 0, srcy = 0;
@@ -835,47 +885,6 @@ class BoundaryMarker : public GridSelector
     }
 };
 
-
-class TestLineSimple
-{
-public:
-    void DoTest(std::vector<double> values, std::vector<int> constraints, int step)
-    {
-        std::vector<int> elev(values.size()*step, -10000);
-        for (int i = 0; i < values.size(); i++)
-            elev[i*step] = MeshElevationToQuantized(values[i]) | MESHPOINT_BOUNDARY;
-        for (int c : constraints)
-            if (c >= 0 && c < values.size())
-                elev[c*step] |= MESHPOINT_EDGE;
-        LineSimplifyByError obj1(10);
-        obj1.Select(elev.data(), (int)elev.size(), step);
-    }
-
-    TestLineSimple()
-    {
-        std::vector<int> empty;
-        std::vector<int> keep1 = { 1 };
-        std::vector<int> keep2 = { 1, 3 };
-        std::vector<double>v0;
-        std::vector<double>v1 = { 1, 2, 3, 4, 5 };
-        std::vector<double>v2 = { 1, 2, 20, 4, 5 };
-        std::vector<double>v3 = { 1, 2, -20, 4, 5 };
-        DoTest(v0, empty, 1);
-        DoTest(v0, keep1, 1);
-        DoTest(v1, empty, 1);
-        DoTest(v1, keep1, 1);
-        DoTest(v1, keep2, 1);
-        DoTest(v2, empty, 1);
-        DoTest(v2, keep1, 1);
-        DoTest(v2, keep2, 1);
-        DoTest(v3, empty, 1);
-        DoTest(v3, keep1, 1);
-        DoTest(v3, keep2, 1);
-    }
-};
-
-//TestLineSimple t;
-
 void DEMesher::SelectBoundary(GridSelector& processor)
 {
     processor.Select(ptr(0),                 _qSize, 1);
@@ -884,9 +893,7 @@ void DEMesher::SelectBoundary(GridSelector& processor)
     processor.Select(ptr(0)+_qSize-1,        _qSize, _qSize);
 }
 
-
-bool DEMesher::Generate(const Tile &north, const Tile &east, const Tile &northEast)
-
+bool DEMesher::Generate()
 {
     if (!CheckForCDB())
         return false;
@@ -894,12 +901,16 @@ bool DEMesher::Generate(const Tile &north, const Tile &east, const Tile &northEa
     auto fileName = _root+_tile.getFilename(".tif");
     OGRSpatialReference oSRS; // GDAL reference system
     oSRS.SetWellKnownGeogCS("WGS84");
+    Coordinates sw = _tile.getCoordinates().low();
+    Coordinates ne = _tile.getCoordinates().high();
+    Coordinates nw (ne.latitude().value(), sw.longitude().value());
+    Coordinates se (sw.latitude().value(), ne.longitude().value());
+    
     {
         // Generate the grid at half the source resolution, one additional as guard
         _qSize = DEMCache::_tileSize+1;
         _quantized.resize(_qSize*_qSize+1, MeshElevationToQuantized(-10000));
         _elev.FromVector(_quantized, _qSize);
-
         // Center reader skips the NORTH edge
         if (!CopyGrid(_tile, 0, 1))
         {
@@ -918,22 +929,38 @@ bool DEMesher::Generate(const Tile &north, const Tile &east, const Tile &northEa
         ptr(0)[_qSize - 1] = ptr(0)[_qSize - 2];
 
         // Copy the top-most row
-        CopyGrid(north, 0, -(_qSize-2));
+        auto northTiles = generate_tiles(CoordinatesRange(nw,nw), _tile.getDataset(), _tile.getLod());
+        CopyGrid(northTiles[0], 0, -(_qSize-2));
 
         // Copy the right-most column
-        CopyGrid(east, _qSize-1, 1);
+        auto eastTiles = generate_tiles(CoordinatesRange(se,se), _tile.getDataset(), _tile.getLod());
+        CopyGrid(eastTiles[0], _qSize-1, 1);
 
         // Copy the top-right corner
-        CopyGrid(northEast, _qSize-1, -(_qSize-2));
+        auto northEastTiles = generate_tiles(CoordinatesRange(ne,ne), _tile.getDataset(), _tile.getLod());
+        CopyGrid(northEastTiles[0], _qSize-1, -(_qSize-2));
     }
     
     BoundaryMarker marker;
     SelectBoundary(marker);
 
+    int minHeight = _elev.Z(0);
+    int maxHeight = minHeight+1;
+    for (int y=1; y < _qSize-1; y++)
+        for (int x=1; x<_qSize-1; x++)
+        {
+            int z = _elev.Z(y, x);
+            maxHeight = std::max(z, maxHeight);
+            minHeight = std::min(z, minHeight);
+        }
+
+    // If the terrain is very shallow force a smaller tolerance so that the
+    // relief is at least a little visible
+    double minimumHeightTolerance = (maxHeight-minHeight)/400.0;
 
     // The process to simplify the mesh uses a height tolerance in meters.
-    // It is set at 1% the vertical dimension of the tile. 
-    double heightTolerance = _scale.Y()*_nominalTileSize/100.0;
+    // It is set at 2% the vertical dimension of the tile. 
+    double heightTolerance = _scale.Y()*_nominalTileSize/50.0;
 
     double seaLevel = 0;
     // Run the mesh simplification and the sea level detail on the boundary
@@ -942,7 +969,7 @@ bool DEMesher::Generate(const Tile &north, const Tile &east, const Tile &northEa
     SelectBoundary(simplify);
     SelectBoundary(forceSeaLevel);
 
-    SimplifyFlat mesher(heightTolerance);
+    SimplifyFlat mesher(std::min(heightTolerance, minimumHeightTolerance));
     mesher.Select(_quantized.data(), _qSize, _qSize);
     SimplifySlope flattener(0.2);
     flattener.Select(_quantized.data(), _qSize, _qSize);
@@ -1160,27 +1187,6 @@ void AddTextureImage(const std::string& imageName, int imageSize, scenegraph::Fa
 
 }
 
-// Returns the tile at a certain coordinate, with the tiles North and West
-void FindTiles(std::vector<Tile>& tiles, const Tile& target, Tile& north, Tile& east, Tile &northEast)
-{
-    Latitude southLat = target.getCoordinates().low().latitude();
-    Longitude westLng = target.getCoordinates().low().longitude();
-    Latitude northLat = target.getCoordinates().high().latitude();
-    Longitude eastLng = target.getCoordinates().high().longitude();
-    for (auto& t : tiles)
-    {
-        auto low = t.getCoordinates().low();
-        auto high = t.getCoordinates().high();
-        if (low.latitude() == northLat && low.longitude()==westLng)
-            north = t;
-        else if (low.latitude()==southLat && low.longitude() == eastLng)
-            east = t;
-        else if (low.latitude()==northLat && low.longitude() == eastLng)
-            northEast = t;
-    }
-
-}
-
 void TestTileEnum(int lod, double west, double east, double south, double north)
 {
     CoordinatesRange selector(west, east, south, north);
@@ -1212,15 +1218,15 @@ void TestTileEnum(int lod, double west, double east, double south, double north)
         if (current.getCoordinates().low().latitude().value() != southInTile)
         {
             assert(westInTile >= west);
+            assert(westInTile >= east);
             
             westInTile = sw.longitude().value();
             southInTile = sw.latitude().value();
             assert(southInTile == northInTile);
             northInTile = ne.latitude().value();
         }
-        assert(westInTile <= west);
         assert(sw.longitude().value() == westInTile);
-        assert(sw.longitude().value() < east || (east == west));
+        assert(westInTile < east || (east == west));
         assert(ne.longitude().value() >= west);
         westInTile = ne.longitude().value();
     }
@@ -1232,6 +1238,7 @@ int main(int argc, char **argv)
     {
         TestTileEnum(0, 1, 1, 0, 2);
         TestTileEnum(0, 1, 1, 48, 52);
+        TestTileEnum(1, 1, 2, 48, 52);
         TestTileEnum(1, 1, 1, 0, 2);
         TestTileEnum(1, 1, 1.5, 0, 2);
         //TestTileEnum(0, 179, -179, 0, 2);
@@ -1240,11 +1247,12 @@ int main(int argc, char **argv)
     cognitics::gdal::init(argv[0]);
     char const* cdb = "C:/ocb/CDB_Yemen_4.0.0";
     LOD lod = 6;
-    double increment = 1.0 / lod.rows();
+    double increment = 2.0 / lod.rows();
     //Coordinates target(12.75, 45);
     //Coordinates target(12.75, 44.97);
     Coordinates target(12.78, 45.0);
-    Coordinates target2(12.98, 45.0);
+    
+    Coordinates target1(12.98, 45.0);
     CoordinatesRange corner(target.longitude().value()-increment, target.longitude().value()+increment,
         target.latitude().value()-increment, target.latitude().value()+increment);
     auto tiles = generate_tiles(corner, Dataset::Elevation, lod);
@@ -1263,36 +1271,34 @@ int main(int argc, char **argv)
         fullArea.Expand(t.getCoordinates().high());
     }
 
-    auto sw = fullArea.low();
-    cts::FlatEarthProjection projection(sw.latitude().value(), sw.longitude().value());
-    auto ne = fullArea.high();
+    double south = fullArea.low().latitude().value();
+    double west =  fullArea.low().longitude().value();
+    double north = fullArea.high().latitude().value();
+    double east =  fullArea.high().longitude().value();
+    cts::FlatEarthProjection projection(south, west);
     int64_t tileGridSize = lod.dimensions();
-    double xMeters = projection.convertGeoToLocalX(ne.longitude().value());
-    double yMeters = projection.convertGeoToLocalY(ne.latitude().value());
-    double xUnits = (ne.longitude().value() - sw.longitude().value())*lod.cols()*tileGridSize;
-    double yUnits = (ne.latitude().value() - sw.latitude().value())*lod.rows()*tileGridSize;
-
-    Coordinates sceneOrigin((sw.latitude().value()+ne.latitude().value())/2, (sw.longitude().value()+ne.longitude().value())/2);
-
+    double xMeters = projection.convertGeoToLocalX(east);
+    double yMeters = projection.convertGeoToLocalY(north);
+    double xUnits = (east-west)*lod.cols()*tileGridSize;
+    double yUnits = (north-south)*lod.rows()*tileGridSize;
     auto sceneScale = sfa::Point(xMeters/xUnits, yMeters/yUnits, 1.0);
+
+    Coordinates sceneOrigin((south+north)/2, (west+east)/2);
 
     std::string timing;
     auto ts_start = std::chrono::steady_clock::now();
 
     for (Tile &current : tiles)
     {
-
-        Tile north, east, northEast;
-        FindTiles(tiles, current, north, east, northEast);
         double displacementY = current.getCoordinates().low().latitude().value() - sceneOrigin.latitude().value();
         double displacementX = current.getCoordinates().low().longitude().value() - sceneOrigin.longitude().value();
-        // At LOD=0 the tile displacement is 1 degree. Convert to tile units
-
-        sfa::Point offset(displacementX * (tileGridSize << lod.value()), displacementY * (tileGridSize << lod.value()));
+        
+        // Convert displacement to tile units
+        sfa::Point offset(displacementX*lod.cols()*tileGridSize, displacementY*lod.rows()*tileGridSize);
         DEMesher test(cdb, current);
         test.Scaling() = sceneScale;
         test.TileOffset() = offset;
-        if (!test.Generate(north, east, northEast))
+        if (!test.Generate())
             continue;
 
         std::cout << "Origin: " << offset.X() << "  " << offset.Y() << std::endl;
@@ -1310,6 +1316,7 @@ int main(int argc, char **argv)
 
     std::cout << "File: " << outputFileName << std::endl;
     scenegraph::buildOpenFlightFromScene(outputFileName, scene.get());
+    scene.reset();
 //	AddTextureImage("N12E045_D004_S001_T001_L06_U49_R2.jp2", 512, &(scene.get()->faces[0]));
     return 0;
 
