@@ -8,6 +8,7 @@
 #include "elev/SimpleDEMReader.h"
 #include "ctl/DelaunayTriangulation.h"
 #include "ctl/TIN.h"
+#include "ctl/Util.h"
 #include <scenegraph/Scene.h>
 #include <scenegraphflt/scenegraphflt.h>
 #include <cassert>
@@ -172,14 +173,18 @@ public:
     int& at(int y, int x=0) { return ptr(y,x)[0]; }
 
 
-    // Return the elevation of a line point, without the flags
+    // Return the elevation of a point, without the flags
     int Z(int y, int x=0) { return MeshQuantizedZ(at(y,x)); }
+
+    // Return the elevation of a point, in meters
+    double Elevation(int y, int x=0) { return MeshQuantizedToElevation(at(y,x)); }
 
     void Remove(int y, int x=0)    { at(y,x) |= MESHPOINT_REMOVED; };   // Remove from triangulation
     void Preserve(int y, int x=0) { at(y,x) &= (~MESHPOINT_REMOVED); }; // Marks the value to be used
     void KeepEdge(int y, int x=0) { at(y,x) |= MESHPOINT_EDGE; at(y,x) &= (~MESHPOINT_REMOVED); }; // Edge to be forced into the triangulation
     bool IsRemoved(int y, int x=0) { return (at(y,x) & MESHPOINT_REMOVED) != 0; }
     bool IsEdge(int y, int x=0)    { return (at(y,x) & MESHPOINT_EDGE) != 0; }
+    bool IsBoundary(int y, int x=0)    { return (at(y,x) & MESHPOINT_BOUNDARY) != 0; }
 
     void FromVector(std::vector<int> &values, int rowSize)
     {
@@ -270,94 +275,52 @@ class DEMesher
     int _nominalTileSize = 1024;
 
     // Position of the SW corner of this tile relative to the origin. This is
-    // given in tile units
-    sfa::Point _origin = sfa::Point(0,0,0);
+    // given in tile units, before scaling
+    ctl::Point _origin = ctl::Point(0,0,0);
 
     // Scaling for the three dimensions to convert from tile units to meters. 
     // It depends on the flat projection, so it varies per tile.
-    sfa::Point _scale = sfa::Point(1.0, 1.0, 1.0);
+    ctl::Point _scale = ctl::Point(1.0, 1.0, 1.0);
 
-
-    int* ptr(int y) 
-    { 
-        assert(y >= 0 && y < _qSize);
-        if (y < 0) y = 0;
-        if (y >= _qSize) y = _qSize - 1;
-        return _quantized.data() + _qSize * y; 
-    }
+    std::vector<ctl::PointList*> _polygons;
 
     bool IsGenerated() const { return _quantized.size() > 0; }
 
 public: 
 
  //! \brief Creates a mesher for the tile at a certain latitude and longitude
-    DEMesher(const std::string& cdbRoot, const Tile& t) :
-            _root(cdbRoot),
-            _tile(t)
-        {
-            LOD lod(t.getLod());
-            _nominalTileSize = lod.dimensions();
-        }
+    DEMesher(const std::string& cdbRoot, const Tile& t, const ctl::Point& origin, const ctl::Point& scale);
+    DEMesher(const DEMesher &) = delete;
+    DEMesher& operator =(const DEMesher&) = delete;
 
-    DEMesher(const std::string &cdbRoot, Latitude south, Longitude west, int LOD) :
-        _root(cdbRoot)
-    {
-        TileLatitude geoLat(south);
-        int tileWidth = get_tile_width(geoLat);
-        TileLongitude geoLng(geoLat, west);
-        if (LOD < 0)
-            LOD = 0;
-        int scale = (1 << LOD);
-        int up = static_cast<int>((south.value() - geoLat.value()) * scale);
-        int right = static_cast<int>((west.value() - geoLng.value()) * scale)/tileWidth;
+    virtual ~DEMesher();
 
-        // Use DS001, S001, T001, tiles for the terrain elevation
-        _tile.setDataset(Dataset(Dataset::Elevation));
-        _tile.setLod(LOD);
-        _tile.setCs1(1);
-        _tile.setCs2(1);
-        _tile.setUref(up);
-        _tile.setRref(right);
 
-        // The coordinates of the tile
-        CoordinatesRange range(geoLng.value() + right * tileWidth / (double)scale,
-            geoLng.value() + (right + 1) * tileWidth / (double)scale,
-            geoLat.value() + up / (double)scale,
-            geoLat.value() + (up + 1)/(double) scale);
-        _tile.setCoordinates(range);
-    }
+    bool AddPolygon(ctl::PointList& p);
 
-    sfa::Point& TileOffset()
-    {
-        return _origin;
-    }
-
-    sfa::Point& Scaling()
-    {
-        return _scale;
-    }
-
-    Tile& TargetTile() { return _tile; }
-
-    bool CheckForCDB()
-    {
-        _root = ccl::standardizeSlashes(_root);
-        if(!_root.size() || _root.back()!='/')
-            _root += "/";
-        ccl::FileInfo fi;
-        return ccl::directoryExists(_root);
-    }
 
     bool Generate();
 
     void Triangulate(scenegraph::Scene* saved);
 
 private:
+    bool CheckForCDB();
     void SelectBoundary(GridSelector& processor);
     bool CopyGrid(const Tile &source, int x, int y);
     void SaveQuantized(const char* fileName);
 
 };
+
+//! \brief Calculates distance from a geographical coordinate to the SW corner of the tile, in tile units
+ctl::Point ConvertGeoToTileUnits(LOD lod, const Coordinates &tileOrigin, Coordinates geo, double elevation = 0)
+{
+    int tileGridSize = lod.dimensions();
+    double tileStep =  get_tile_width(TileLatitude(tileOrigin.latitude()));
+
+    double xUnits = (geo.longitude().value() - tileOrigin.longitude().value()) / tileStep * lod.cols() * tileGridSize;
+    double yUnits = (geo.latitude().value() - tileOrigin.latitude().value()) * lod.rows() * tileGridSize;
+    return ctl::Point(xUnits, yUnits, elevation);
+}
 
 
 //! \brief Sets the name and location of the scene that represents the tile
@@ -497,6 +460,60 @@ std::vector<int> * DEMCache::GetGrid(const Tile& tile, const std::string& cdbRoo
     return grid;
 }
 
+DEMesher::DEMesher(const std::string& cdbRoot, const Tile& t, const ctl::Point &origin, const ctl::Point& scale) :
+        _root(cdbRoot),
+        _tile(t),
+        _origin(origin),
+        _scale(scale),
+        _nominalTileSize(LOD(t.getLod()).dimensions()) {}
+
+DEMesher::~DEMesher()
+{
+    for (ctl::PointList* p : _polygons)
+        delete p;
+}
+
+bool DEMesher::CheckForCDB()
+{
+    _root = ccl::standardizeSlashes(_root);
+    if(!_root.size() || _root.back()!='/')
+        _root += "/";
+    ccl::FileInfo fi;
+    return ccl::directoryExists(_root);
+}
+
+
+
+//! \brief Includes a polygon in the mesh6
+// The polygon is given in geographic coordinates. For now the altitude is ignored.
+bool DEMesher::AddPolygon(ctl::PointList& p)
+{
+    // Convert the polygon to tile units
+    ctl::PointList *converted = new ctl::PointList(p.size());
+    for (int i = 0; i < p.size(); i++)
+    {
+        Coordinates geo(p[i].y, p[i].x);
+        converted[0][i] = ConvertGeoToTileUnits(_tile.getLod(), _tile.getCoordinates().low(), geo);
+        converted[0][i].y = 1024 - converted[0][i].y;
+    }
+    ctl::PointList tightBoundary =
+    {
+        ctl::Point(0, 0, 0), ctl::Point(_nominalTileSize, 0, 0), ctl::Point(_nominalTileSize, _nominalTileSize, 0),  
+                             ctl::Point(0, _nominalTileSize, 0), ctl::Point(0, 0, 0)
+    };
+    ctl::PointList clipped = ctl::ClipToPolygon(*converted, tightBoundary, 1.0/(_nominalTileSize*2));
+    if (clipped.size() <= 2)
+    {
+        delete converted;
+        return false;
+    }
+    converted->resize(clipped.size());
+    std::copy(clipped.begin(), clipped.end(), converted->begin());
+    _polygons.push_back(converted);
+    return true;
+}
+
+
 //! \brief Writes a JSON with the quantized values, for analysis outside
 void DEMesher::SaveQuantized(const char* fileName)
 {
@@ -504,7 +521,7 @@ void DEMesher::SaveQuantized(const char* fileName)
     fd << "{ \"data\": [\n";
     for(int y = 0; y < _qSize; y++)
     {
-        int* src = ptr(y);
+        int* src = _elev.ptr(y);
         if(y > 0)
             fd << ",\n";
         fd << "[ ";
@@ -557,7 +574,7 @@ bool DEMesher::CopyGrid(const Tile &source, int x, int y)
     int copyWidth = std::min(_qSize - x, gridSize - srcx);
     for(; y<_qSize && srcy<gridSize; y++, srcy++)
     { 
-        int* dst = ptr(y) + x;
+        int* dst = _elev.ptr(y, x);
         int* srcRow = (*grid).data() + gridSize *srcy + srcx;
         for(int i = 0; i < copyWidth; i++)
             dst[i] = srcRow[i];
@@ -626,10 +643,8 @@ private:
             }
             else if (altitude != 0 && tolerance != 0 && _data[index] & (MESHPOINT_BOUNDARY | MESHPOINT_EDGE))
             {
-                // If the neighbor is an edge and the altitude is close to the limit, let's
-                // discard it anyway
-                int highTolerance = (tolerance * 12) / 10;
-                inRange = altitude >= high - highTolerance && altitude <= low + highTolerance;
+                // If the neighbor is edge discard the point anyway
+                inRange = true;
             }
 
             return inRange;
@@ -665,7 +680,7 @@ private:
                     inRange++;
                 if (CheckNeighbor(idx - _step)) // Above neighbor
                     inRange++;
-                if (inRange == 4)
+                if (inRange == 4 || (inRange==3))// && MeshQuantizedZ(_data[idx]!=0)))
                 {
                     _data[idx] |= MESHPOINT_REMOVED;
                     removed++;
@@ -742,7 +757,13 @@ private:
                     row[x] |= MESHPOINT_REMOVED;
                 }
                 else if ((row[x] & MESHPOINT_REMOVED) == 0)
+                {
                     accepted++;
+                    // Accepted pixels at sea level are marked as edges, so that they are not 
+                    // simplified out
+                    if (MeshQuantizedZ(row[x]) == 0)
+                        row[x] |= MESHPOINT_EDGE;
+                }
             }
         }
         std::cout << removed << " colinear points, " << accepted << " remaining points" << std::endl;
@@ -833,7 +854,7 @@ public:
 
 /*! \brief Preserve sea level boundaries in a line
 
-     This class keeps the points in the line points where there is a transition from sea to land
+     This class keeps the points in the line where there is a transition from sea to land
 */
 class KeepSeaLevelInLine : public GridSelector
 {
@@ -887,10 +908,10 @@ class BoundaryMarker : public GridSelector
 
 void DEMesher::SelectBoundary(GridSelector& processor)
 {
-    processor.Select(ptr(0),                 _qSize, 1);
-    processor.Select(ptr(0),                 _qSize, _qSize);
-    processor.Select(ptr(_qSize-1),          _qSize, 1);
-    processor.Select(ptr(0)+_qSize-1,        _qSize, _qSize);
+    processor.Select(_elev.ptr(0),                 _qSize, 1);
+    processor.Select(_elev.ptr(0),                 _qSize, _qSize);
+    processor.Select(_elev.ptr(_qSize-1),          _qSize, 1);
+    processor.Select(_elev.ptr(0, _qSize-1),       _qSize, _qSize);
 }
 
 bool DEMesher::Generate()
@@ -922,11 +943,10 @@ bool DEMesher::Generate()
         // Copy the missing top and left edges
         for (int i = 0; i < _qSize; i++)
         {
-            ptr(0)[i] = ptr(1)[i];
-            ptr(i)[_qSize - 1] = ptr(i)[_qSize - 2];
-            ptr(i)[_qSize - 1] = ptr(i)[_qSize - 2];
+            _elev.ptr(0)[i] = _elev.ptr(1)[i];
+            _elev.ptr(i)[_qSize - 1] = _elev.ptr(i)[_qSize - 2];
         }
-        ptr(0)[_qSize - 1] = ptr(0)[_qSize - 2];
+        _elev.ptr(0)[_qSize - 1] = _elev.ptr(0)[_qSize - 2];
 
         // Copy the top-most row
         auto northTiles = generate_tiles(CoordinatesRange(nw,nw), _tile.getDataset(), _tile.getLod());
@@ -960,7 +980,7 @@ bool DEMesher::Generate()
 
     // The process to simplify the mesh uses a height tolerance in meters.
     // It is set at 2% the vertical dimension of the tile. 
-    double heightTolerance = _scale.Y()*_nominalTileSize/50.0;
+    double heightTolerance = _scale.y*_nominalTileSize/50.0;
 
     double seaLevel = 0;
     // Run the mesh simplification and the sea level detail on the boundary
@@ -1013,71 +1033,74 @@ void DEMesher::Triangulate(scenegraph::Scene* scene)
     // the best way to build it is: (xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)
     // The boundary is outside the tile. The Delaunay code does not like when the 
     // boundary falls on the tile edged.
-    ctl::PointList boundary{ 
-        ctl::Point(       -1,        -1, MeshQuantizedToElevation(_elev.at(0,0))),
-        ctl::Point(_qSize,        -1, MeshQuantizedToElevation(_elev.at(0,_qSize-1))), 
-        ctl::Point(_qSize, _qSize, MeshQuantizedToElevation(_elev.at(_qSize-1,_qSize-1))), 
-        ctl::Point(-1,        _qSize, MeshQuantizedToElevation(_elev.at(_qSize-1,0))) 
-    };
-
-    ctl::DelaunayTriangulation dt(boundary);//, 5000, 1e-6, 3e-5, 10000, 0);
+    ctl::PointList boundary {
+        ctl::Point(-1,       -1, 0),   
+        ctl::Point(_qSize,   -1, 0),  
+        ctl::Point(_qSize,  _qSize, 0),
+        ctl::Point(-1,      _qSize, 0),  
+        ctl::Point(-1,      -1, 0)  };
 
     // All the points that have not been removed are constraints
 
     // First, insert the constrainted outside contour
     std::vector<ctl::Point> contour;
 
-    // The coordinate system for the display has the origin on the bottom-right, but the images have the
-    // origin at the top-left.
-    auto ScenePoint = [&](int x, int y, int altitude)->ctl::Point
-    {
-        return ctl::Point(x, _qSize-y-1, MeshQuantizedToElevation(altitude));
-    };
-
     auto AddToContour = [&](int x, int y)
     {
-        int altitude = ptr(y)[x];
-        if ((altitude & MESHPOINT_REMOVED) == 0)
-            contour.push_back(ScenePoint(x,y,altitude));
+        if (!_elev.IsRemoved(y,x))
+            contour.push_back(ctl::Point(x,y,_elev.Elevation(y ,x)));
     };
-    int x=0, y=0;
+    int x=0, y =_qSize-1;
     for (; x < _qSize - 1; x++)
         AddToContour(x, y);
-    for (; y < _qSize-1; y++)
+    for (; y>0; y--)
         AddToContour(x, y);
     for (; x>0; x--)
         AddToContour(x, y);
     // Note that the first point is repeated at the end
-    for (; y>=0; y--)
+    for (; y <= _qSize-1; y++)
         AddToContour(x, y);
 
+    ctl::DelaunayTriangulation dt(boundary, 200, 1e-6, 3e-5, 10000, 0);
+       // ctl::DelaunayTriangulation::INTERPOLATE_EDGES);//| ctl::DelaunayTriangulation::INTERPOLATE_FACES);
+
     int failedPoints = 0;
-    if (!dt.InsertConstrainedLineString(contour))
+    if (!dt.InsertConstrainedLineString(contour)) 
         failedPoints = (int)contour.size();
     int insertedPoints = (int)contour.size();
     for (y=1; y<_qSize-1; y++)
         for (x = 1; x < _qSize-1; x++)
-        {
-            int altitude = ptr(y)[x];
-            if ((altitude & MESHPOINT_REMOVED) == 0)
+            if (!_elev.IsRemoved(y,x))
             {
                 insertedPoints++;
-                if (dt.InsertConstrainedPoint(ScenePoint(x,y,altitude)) == 0)
-                    failedPoints++;
+                auto p = ctl::Point(x, y, _elev.Elevation(y, x));
+                dt.InsertWorkingPoint(p);
             }
+    int subsample = _nominalTileSize / (_qSize-1);
+    for (auto& polygon : _polygons)
+    {
+        ctl::PointList clipped = *polygon;
+
+        for (auto& point : clipped)
+        {
+            point.x /= subsample;
+            point.y /= subsample;
+            point.z = _elev.Elevation(int(point.y + 0.5), int(point.x + 0.5))+20;
         }
+        dt.InsertConstrainedPolygon(clipped);
+    }
+
     std::vector<ctl::Edge*> edges;
     edges = dt.GatherTriangles(ctl::PointList());
     ctl::TIN container(&dt, edges);
-    int subsample = _nominalTileSize / (_qSize-1);
     int useTexture = true;
     if (scene)
     {
         SetSceneAttributes(scene, _tile.getFilename(""), _tile.getCoordinates());
         scene->hasVertexNormals = true;
         // The sfa:Matrix is very well thought out
-        scene->matrix.PushTranslate(_origin);
-        scene->matrix.PushScale(_scale);
+        scene->matrix.PushTranslate(sfa::Point(_origin.x, _origin.y, _origin.z));
+        scene->matrix.PushScale(sfa::Point(_scale.x, _scale.y, _scale.z));
         scene->faces.emplace_back();
         scenegraph::Face& face = scene->faces.back();
         face.primaryColor = scenegraph::Color((double)_faceRGB[0]/255.0, (double)_faceRGB[1]/255.0,(double)_faceRGB[2]/255.0);
@@ -1114,10 +1137,12 @@ void DEMesher::Triangulate(scenegraph::Scene* scene)
                     corners[numCorners] = corners[3] = numPoints;
                 numCorners++;
             }
+            // The tile coordinate system has the origin on the bottom-right, but the images have the
+            // origin at the top-left. Flip the Y
             v.x *= subsample;
-            v.y *= subsample;
+            v.y = (_qSize-1-v.y)*subsample;
             face.addVert(sfa::Point(v.x, v.y, v.z));
-            face.vertexNormals.push_back(sfa::Point(normals[i].x, normals[i].y, normals[i].x));
+            face.vertexNormals.push_back(sfa::Point(-normals[i].x, -normals[i].y, -normals[i].x));
             if (texture)
             {
                 // UV is tricky: uv = 0.5/1024 samples the first row or column of the image.
@@ -1135,7 +1160,9 @@ void DEMesher::Triangulate(scenegraph::Scene* scene)
         {
             if (!IsCorner(triangles[i]) && !IsCorner(triangles[i+1]) && !IsCorner(triangles[i+2]))
             {
-                success = success && face.AddFacet(triangles[i+0], triangles[i+1], triangles[i+2]);
+                // Note that we swap two vertices to get the triangle orientation correct, because 
+                // we inverted the Y coordinate above.
+                success = success && face.AddFacet(triangles[i+0], triangles[i+2], triangles[i+1]);
                 ++numTriangles;
             }
         }
@@ -1163,7 +1190,6 @@ void DEMesher::Triangulate(scenegraph::Scene* scene)
             success = success && seaSurface.AddFacet(0, 2, 3);
         }
 
-
         if (!success)
             std::cout << "Cannot save the mesh" << std::endl;
         else
@@ -1172,22 +1198,7 @@ void DEMesher::Triangulate(scenegraph::Scene* scene)
 
 }
 
-
-void AddTextureImage(const std::string& imageName, int imageSize, scenegraph::Face* face)
-{
-    face->textures.emplace_back();
-    scenegraph::MappedTexture &mt = face->textures.back();
-    mt.SetTextureName(imageName);
-    for (size_t i = 0; i<face->getNumVertices(); i++)
-    {
-        auto& v = face->verts[i];
-        // Since the image covers the tile the calculations are trivial
-        mt.uvs.push_back(sfa::Point(v.X()/imageSize, v.Y()/imageSize));
-    }
-
-}
-
-void TestTileEnum(int lod, double west, double east, double south, double north)
+std::vector<Tile> TestTileEnum(int lod, double west, double east, double south, double north)
 {
     CoordinatesRange selector(west, east, south, north);
 
@@ -1230,13 +1241,108 @@ void TestTileEnum(int lod, double west, double east, double south, double north)
         assert(ne.longitude().value() >= west);
         westInTile = ne.longitude().value();
     }
+    return tiles;
+}
+
+void AddTestPolygon(DEMesher* object, CoordinatesRange targetArea)
+{
+    // Start with a polygon horizontal, and 0.0002 degrees high, and then
+    // apply rotations
+    Coordinates sw = targetArea.low();
+    Coordinates ne = targetArea.high();
+    double latitude = (sw.latitude().value() + ne.latitude().value()) / 2;
+    double longitude = (sw.longitude().value() + ne.longitude().value()) / 2;
+    double width = ne.longitude().value() - sw.longitude().value();
+    double height = 0.001;
+    std::vector <sfa::Point> centerPoints(5);
+    centerPoints[0] = sfa::Point(-width/2, -height/2);
+    centerPoints[1] = sfa::Point(width/2, -height/2);
+    centerPoints[2] = sfa::Point(width/2, height/2);
+    centerPoints[3] = sfa::Point(-width/2, height/2);
+    centerPoints[4] = centerPoints[0];
+
+
+    ctl::PointList points(5);
+    for (int r = 0; r < 4; r++)
+    {
+        double rotationAngle = 30.0 / 180.0 *  M_PI * r;
+        sfa::Matrix rotation;
+        rotation.PushRotate(sfa::Point(0, 0, 1), rotationAngle);
+        rotation.PushTranslate(sfa::Point(longitude, latitude));
+        for (int i = 0; i < points.size(); i++)
+        {
+            sfa::Point rotated = rotation * centerPoints[i];
+            points[i] = ctl::Point(rotated.X(), rotated.Y(), rotated.Z());
+        }
+        object->AddPolygon(points);
+    }
+}
+
+void TestPolygons()
+{
+    ctl::PointList polygon = { ctl::Point(0,0,1), ctl::Point(1,0,0), ctl::Point(0,1,0) };
+    ctl::PointList extended = polygon;
+    ctl::PointList line(polygon.begin(), polygon.begin()+2);
+    ctl::PointList point(1, polygon[0]);
+    ctl::PointList empty;
+    ctl::Point outside(4, 0, 0);
+    ctl::Point center = polygon[0] + polygon[1] + polygon[2];
+    center.x /= 3.0;
+    center.y /= 3.0;
+    center.z /= 3.0;
+    extended.push_back(extended.front());
+    
+    ctl::PointList clip = polygon;
+    for (auto& point : clip)
+        point = point + ctl::Point(0.2, 0.2, 0.2);
+    ctl::PointList clipExtended = clip;
+    clipExtended.push_back(clipExtended.front());
+    
+
+    double  area = PArea2D(polygon);
+    assert(area == -0.5); 
+    assert(area == PArea2D(extended));
+
+    assert(PArea2D(line)==0);
+    assert(PArea2D(point)==0);
+    assert(PArea2D(empty)==0);
+
+//    double  area3 = PArea3D(polygon);
+//    assert(area3 == PArea3D(extended));
+
+
+    assert(PointInPolygon(center, polygon));
+    assert(PointInPolygon(center, extended));
+
+    assert(!PointInPolygon(outside, polygon));
+    assert(!PointInPolygon(outside, extended));
+
+    double epsilon = 1e-5;
+    auto section = ClipToPolygon(polygon, clip, epsilon);
+    auto section2 = ClipToPolygon(polygon, clipExtended, epsilon);
+    assert(section == section2);
+
+    std::reverse(clip.begin(), clip.end());
+    std::reverse(clipExtended.begin(), clipExtended.end());
+    section = ClipToPolygon(polygon, clip, epsilon);
+    section2 = ClipToPolygon(polygon, clipExtended, epsilon);
+    assert(section == section2);
 }
 
 int main(int argc, char **argv)
 {
-    if (1)
+    if (0)
     {
-        TestTileEnum(0, 1, 1, 0, 2);
+        TestPolygons();
+       auto t1 = TestTileEnum(0, 1, 1, 0, 2);
+       assert(t1.size() == 2);
+       auto t2 = TestTileEnum(1,
+           t1[0].getCoordinates().low().longitude().value(),
+           t1[0].getCoordinates().high().longitude().value(),
+           t1[0].getCoordinates().low().latitude().value(),
+           t1[0].getCoordinates().high().latitude().value());
+       assert(t2.size() == 4);
+
         TestTileEnum(0, 1, 1, 48, 52);
         TestTileEnum(1, 1, 2, 48, 52);
         TestTileEnum(1, 1, 1, 0, 2);
@@ -1252,7 +1358,7 @@ int main(int argc, char **argv)
     //Coordinates target(12.75, 44.97);
     Coordinates target(12.78, 45.0);
     
-    Coordinates target1(12.98, 45.0);
+    //Coordinates target(12.98, 45.0);
     CoordinatesRange corner(target.longitude().value()-increment, target.longitude().value()+increment,
         target.latitude().value()-increment, target.latitude().value()+increment);
     auto tiles = generate_tiles(corner, Dataset::Elevation, lod);
@@ -1271,64 +1377,48 @@ int main(int argc, char **argv)
         fullArea.Expand(t.getCoordinates().high());
     }
 
-    double south = fullArea.low().latitude().value();
-    double west =  fullArea.low().longitude().value();
-    double north = fullArea.high().latitude().value();
-    double east =  fullArea.high().longitude().value();
-    cts::FlatEarthProjection projection(south, west);
-    int64_t tileGridSize = lod.dimensions();
-    double xMeters = projection.convertGeoToLocalX(east);
-    double yMeters = projection.convertGeoToLocalY(north);
-    double xUnits = (east-west)*lod.cols()*tileGridSize;
-    double yUnits = (north-south)*lod.rows()*tileGridSize;
-    auto sceneScale = sfa::Point(xMeters/xUnits, yMeters/yUnits, 1.0);
+    auto sw = fullArea.low();
+    auto ne = fullArea.high();
+    cts::FlatEarthProjection projection(sw.latitude().value(), sw.longitude().value());
+    double xMeters = projection.convertGeoToLocalX(ne.longitude().value());
+    double yMeters = projection.convertGeoToLocalY(ne.latitude().value());
 
-    Coordinates sceneOrigin((south+north)/2, (west+east)/2);
-
-    std::string timing;
+    auto distance = ConvertGeoToTileUnits(lod, sw, ne);
+    auto sceneScale = ctl::Point(xMeters / distance.x, yMeters / distance.y, 1);
+    Coordinates sceneOrigin(projection.convertLocalToGeoLat(yMeters/2),
+        projection.convertLocalToGeoLon(xMeters/2));
     auto ts_start = std::chrono::steady_clock::now();
 
-    for (Tile &current : tiles)
+    for (int i=0; i<tiles.size(); i++)
     {
-        double displacementY = current.getCoordinates().low().latitude().value() - sceneOrigin.latitude().value();
-        double displacementX = current.getCoordinates().low().longitude().value() - sceneOrigin.longitude().value();
-        
-        // Convert displacement to tile units
-        sfa::Point offset(displacementX*lod.cols()*tileGridSize, displacementY*lod.rows()*tileGridSize);
-        DEMesher test(cdb, current);
-        test.Scaling() = sceneScale;
-        test.TileOffset() = offset;
+//        if (i != 10 && i != 6)  continue;
+        Tile& current = tiles[i];
+        // Calculate distance to the origin of the new tile
+        ctl::Point offset = ConvertGeoToTileUnits(lod, sceneOrigin, current.getCoordinates().low());
+        DEMesher test(cdb, current, offset, sceneScale);
         if (!test.Generate())
             continue;
+        AddTestPolygon(&test, fullArea);
 
-        std::cout << "Origin: " << offset.X() << "  " << offset.Y() << std::endl;
+        std::cout << "Origin: " << offset.x << "  " << offset.y << std::endl;
         scenegraph::Scene* tileScene = new scenegraph::Scene(scene.get());
         test.Triangulate(tileScene);
     }
     auto ts_stop = std::chrono::steady_clock::now();
     double time = std::chrono::duration<double>(ts_stop - ts_start).count();
     std::cout<< ("runtime: " + std::to_string(tiles.size()/time)+" tiles/second")<<std::endl;
-    std::cout << "time = " << timing << std::endl;
 
-    SetSceneAttributes(scene.get(), "Master scene", fullArea);
+    std::string location = 
+        std::to_string(fullArea.low().latitude().value()) + "_" +
+        std::to_string(fullArea.low().longitude().value()) + "_" +
+        std::to_string(fullArea.high().latitude().value()) + "_" +
+        std::to_string(fullArea.high().longitude().value());
+    SetSceneAttributes(scene.get(), "SC_"+location, fullArea);
 
     std::string outputFileName = "c:/build/temp/terrain" + std::to_string(lod.value()) + ".flt";
 
-    std::cout << "File: " << outputFileName << std::endl;
+    std::cout << "File: " << outputFileName << " " << location << std::endl;
     scenegraph::buildOpenFlightFromScene(outputFileName, scene.get());
     scene.reset();
-//	AddTextureImage("N12E045_D004_S001_T001_L06_U49_R2.jp2", 512, &(scene.get()->faces[0]));
     return 0;
-
-
-    for (double s =89; s<=90; s+=0.1)
-        for (double e = 44; e <= 48.1; e += 0.1)
-        {
-            DEMesher  mesher(cdb,s,e,3);
-            std::cout << "A: "<< mesher.TargetTile().getFilename("tif") << std::endl;
-            CoordinatesRange corner(e,e+0.0001,s,s+0.0001);
-            auto list = generate_tiles(corner, mesher.TargetTile().getDataset(), 3);
-            std::cout << "B: "<< list[0].getFilename() << std::endl;
-
-        }
 }
