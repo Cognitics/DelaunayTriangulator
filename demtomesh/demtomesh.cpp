@@ -271,6 +271,9 @@ class DEMesher
     // Add an additional face with the sea level
     bool _addSeaLevel = false;
 
+    // Inserted polygons follow terrain altitude or set their own altitudet
+    bool _polygonFollowTerrain = false;
+
     // Number of grid units per tile. It depends on the LOD
     int _nominalTileSize = 1024;
 
@@ -295,9 +298,10 @@ public:
 
     virtual ~DEMesher();
 
+    const Tile& GetTile() const { return _tile; }
 
-    bool AddPolygon(ctl::PointList& p);
 
+    bool AddPolygon(const ctl::PointList& p);
 
     bool Generate();
 
@@ -320,6 +324,35 @@ ctl::Point ConvertGeoToTileUnits(LOD lod, const Coordinates &tileOrigin, Coordin
     double xUnits = (geo.longitude().value() - tileOrigin.longitude().value()) / tileStep * lod.cols() * tileGridSize;
     double yUnits = (geo.latitude().value() - tileOrigin.latitude().value()) * lod.rows() * tileGridSize;
     return ctl::Point(xUnits, yUnits, elevation);
+}
+
+
+//! \brief Generates a string with the points of a polygon
+std::string JSONPolygon(const ctl::PointList& polygon, char const *lineBreak="\n")
+{
+    std::string out = "[ ";
+    out.reserve(32 * (polygon.size() + 1));
+    size_t previousBreak = out.size();
+    for (auto& p : polygon)
+    {
+        if (out.size() > 6)
+        {
+            out += ", ";
+            if (lineBreak)
+            {
+                out += lineBreak;
+                previousBreak = out.size();
+            }
+        }
+        if (out.size() > previousBreak + 80)
+        {
+            out += "\n";
+            previousBreak = out.size();
+        }
+        out = out + std::to_string(p.x) + "," + std::to_string(p.y) + "," + std::to_string(p.z);
+    }
+    out += "]";
+    return out;
 }
 
 
@@ -362,6 +395,7 @@ void DEMCache::FreeGrid(const Tile &tile)
         elevationCache.erase(range);
     }
 }
+
 //! \brief Generates a replacement for the elevation grid from a tile with lower LOD
 std::vector<int>* DEMCache::ReplaceGrid(const Tile& tile, const std::string& cdbRoot)
 {
@@ -461,6 +495,7 @@ std::vector<int> * DEMCache::GetGrid(const Tile& tile, const std::string& cdbRoo
 }
 
 DEMesher::DEMesher(const std::string& cdbRoot, const Tile& t, const ctl::Point &origin, const ctl::Point& scale) :
+        _qSize(DEMCache::_tileSize+1),
         _root(cdbRoot),
         _tile(t),
         _origin(origin),
@@ -482,26 +517,31 @@ bool DEMesher::CheckForCDB()
     return ccl::directoryExists(_root);
 }
 
-
-
 //! \brief Includes a polygon in the mesh6
-// The polygon is given in geographic coordinates. For now the altitude is ignored.
-bool DEMesher::AddPolygon(ctl::PointList& p)
+//   The polygon X,Y given in tile units relative to the origin of the scene. That
+//   way is it possible to send the same polygon to several tiles in the same scene
+//   The use of the polygon Z depends on the _polygonFollowTerrain member
+//     -followTerrain=true, the polygon altitude is ignored and the polygon will follow the terrain
+//     -followTerrain=false, the polygon is a plane, and it will set the altitude
+bool DEMesher::AddPolygon(const ctl::PointList& p)
 {
     // Convert the polygon to tile units
     ctl::PointList *converted = new ctl::PointList(p.size());
+    // Convert the polyton to grid units, where (0,0) is the top of the grid
+    int subsample = _nominalTileSize / (_qSize-1);
     for (int i = 0; i < p.size(); i++)
     {
-        Coordinates geo(p[i].y, p[i].x);
-        converted[0][i] = ConvertGeoToTileUnits(_tile.getLod(), _tile.getCoordinates().low(), geo);
-        converted[0][i].y = 1024 - converted[0][i].y;
+        converted[0][i].x = (p[i].x-_origin.x)/subsample;
+        converted[0][i].y = _qSize-1 - (p[i].y-_origin.y)/subsample;
+        converted[0][i].z = p[i].z;
     }
     ctl::PointList tightBoundary =
     {
-        ctl::Point(0, 0, 0), ctl::Point(_nominalTileSize, 0, 0), ctl::Point(_nominalTileSize, _nominalTileSize, 0),  
-                             ctl::Point(0, _nominalTileSize, 0), ctl::Point(0, 0, 0)
+        ctl::Point(0, 0, 0), ctl::Point(_qSize-1, 0, 0), ctl::Point(_qSize-1, _qSize-1, 0),  
+                             ctl::Point(0, _qSize-1, 0), ctl::Point(0, 0, 0)
     };
-    ctl::PointList clipped = ctl::ClipToPolygon(*converted, tightBoundary, 1.0/(_nominalTileSize*2));
+
+    ctl::PointList clipped = ctl::ClipToPolygon(*converted, tightBoundary, 1.0/(_qSize*4));
     if (clipped.size() <= 2)
     {
         delete converted;
@@ -790,7 +830,7 @@ class LineSimplifyByError : public GridSelector
 
     // Maximum spacing between preserved points. We want to keep a few points in the
     // line to make triangulation simpler
-    static int const MAX_DISTANCE = 32;
+    static int const MAX_DISTANCE = 10000;
 
 public:
     LineSimplifyByError(double toleranceMeters) :
@@ -929,7 +969,6 @@ bool DEMesher::Generate()
     
     {
         // Generate the grid at half the source resolution, one additional as guard
-        _qSize = DEMCache::_tileSize+1;
         _quantized.resize(_qSize*_qSize+1, MeshElevationToQuantized(-10000));
         _elev.FromVector(_quantized, _qSize);
         // Center reader skips the NORTH edge
@@ -1061,8 +1100,18 @@ void DEMesher::Triangulate(scenegraph::Scene* scene)
     for (; y <= _qSize-1; y++)
         AddToContour(x, y);
 
-    ctl::DelaunayTriangulation dt(boundary, 200, 1e-6, 3e-5, 10000, 0);
-       // ctl::DelaunayTriangulation::INTERPOLATE_EDGES);//| ctl::DelaunayTriangulation::INTERPOLATE_FACES);
+    ctl::DelaunayTriangulation dt(boundary, ctl::Point(0,0,0));
+    dt.Disable(dt.CLIPPING);
+    if (_polygonFollowTerrain)
+    {
+        dt.Enable(dt.INTERPOLATE_EDGES);
+        dt.Enable(dt.INTERPOLATE_FACES);
+    }
+    else
+    {
+        dt.Disable(dt.INTERPOLATE_EDGES);
+        dt.Disable(dt.INTERPOLATE_FACES);
+    }
 
     int failedPoints = 0;
     if (!dt.InsertConstrainedLineString(contour)) 
@@ -1079,15 +1128,8 @@ void DEMesher::Triangulate(scenegraph::Scene* scene)
     int subsample = _nominalTileSize / (_qSize-1);
     for (auto& polygon : _polygons)
     {
-        ctl::PointList clipped = *polygon;
-
-        for (auto& point : clipped)
-        {
-            point.x /= subsample;
-            point.y /= subsample;
-            point.z = _elev.Elevation(int(point.y + 0.5), int(point.x + 0.5))+20;
-        }
-        dt.InsertConstrainedPolygon(clipped);
+        std::cout << " Polygon: " << JSONPolygon(*polygon) << std::endl;
+        dt.InsertConstrainedPolygon(*polygon);
     }
 
     std::vector<ctl::Edge*> edges;
@@ -1244,9 +1286,56 @@ std::vector<Tile> TestTileEnum(int lod, double west, double east, double south, 
     return tiles;
 }
 
-void AddTestPolygon(DEMesher* object, CoordinatesRange targetArea)
+//! \brief Changes the Z of the polygon points so that all of them fall on a plane
+void PolygonFlatApproximation(ctl::PointList& polygon, double epsilon=0.001)
 {
-    // Start with a polygon horizontal, and 0.0002 degrees high, and then
+    // Find the two points that generate the largest are triangle with the origin.
+    if (polygon.size() <= 3)
+        return;
+    int n = (int)polygon.size();
+    ctl::Point origin = polygon[0];
+    int i1 = 1;
+    int i2 = n-1;
+    double maxArea = ctl::TArea2D(origin, polygon[i1+1], polygon[i2]);
+    maxArea = std::abs(maxArea);
+    while (i2 > i1)
+    {
+        double area1 = ctl::TArea2D(origin, polygon[i1+1], polygon[i2]);
+        double area2 = ctl::TArea2D(origin, polygon[i1], polygon[i2-1]);
+        area1 = std::abs(area1);
+        area2 = std::abs(area2);
+        if (area1 < maxArea && area2<maxArea)
+            break;
+        // Pick the triangle growth with largest area
+        if (area1 > area2)
+        {
+            maxArea = area1;
+            i1++;
+        }
+        else
+        {
+            maxArea = area2;
+            i2--;
+        }
+    }
+    if (maxArea > 0.01)
+    {
+        ctl::Point U = polygon[i1] - origin;
+        ctl::Point V = polygon[i2] - origin;
+        double area = V.x * U.y - V.y * U.x;
+        for (auto& point : polygon)
+        {
+            ctl::Point P = point - origin;
+            double v = (P.x * U.y - P.y * U.x) / area;
+            double u = (P.y * V.x - P.x * V.y) / area;
+            point.z = origin.z + u * U.z + v * V.z;
+        }
+    }
+}
+
+void AddTestPolygon(DEMesher* object, CoordinatesRange targetArea, Coordinates sceneOrigin)
+{
+    // Start with a polygon horizontal, and 0.001 degrees high, and then
     // apply rotations
     Coordinates sw = targetArea.low();
     Coordinates ne = targetArea.high();
@@ -1255,25 +1344,33 @@ void AddTestPolygon(DEMesher* object, CoordinatesRange targetArea)
     double width = ne.longitude().value() - sw.longitude().value();
     double height = 0.001;
     std::vector <sfa::Point> centerPoints(5);
-    centerPoints[0] = sfa::Point(-width/2, -height/2);
-    centerPoints[1] = sfa::Point(width/2, -height/2);
-    centerPoints[2] = sfa::Point(width/2, height/2);
-    centerPoints[3] = sfa::Point(-width/2, height/2);
+    centerPoints[0] = sfa::Point(-width/2, -height/2, 200);
+    centerPoints[1] = sfa::Point(width/2, -height/2, 100);
+    centerPoints[2] = sfa::Point(width/2, height/2, 101);
+    centerPoints[3] = sfa::Point(-width/2, height/2, 200);
     centerPoints[4] = centerPoints[0];
+    sfa::Point origin(sfa::Point(sceneOrigin.longitude().value(), sceneOrigin.latitude().value()));
 
-
-    ctl::PointList points(5);
+    ctl::PointList points(centerPoints.size());
+    LOD lod = object->GetTile().getLod();
     for (int r = 0; r < 4; r++)
     {
         double rotationAngle = 30.0 / 180.0 *  M_PI * r;
         sfa::Matrix rotation;
         rotation.PushRotate(sfa::Point(0, 0, 1), rotationAngle);
-        rotation.PushTranslate(sfa::Point(longitude, latitude));
+        rotation.PushTranslate(origin);
         for (int i = 0; i < points.size(); i++)
         {
             sfa::Point rotated = rotation * centerPoints[i];
             points[i] = ctl::Point(rotated.X(), rotated.Y(), rotated.Z());
         }
+        for (auto &p : points)
+        {
+            Coordinates geo(p.y, p.x);
+            p = ConvertGeoToTileUnits(lod, sceneOrigin, geo, p.z);
+        }
+        double area = ctl::PArea3D(points);
+        PolygonFlatApproximation(points);
         object->AddPolygon(points);
     }
 }
@@ -1391,14 +1488,14 @@ int main(int argc, char **argv)
 
     for (int i=0; i<tiles.size(); i++)
     {
-//        if (i != 10 && i != 6)  continue;
+        //if (i !=  9)  continue;
         Tile& current = tiles[i];
         // Calculate distance to the origin of the new tile
         ctl::Point offset = ConvertGeoToTileUnits(lod, sceneOrigin, current.getCoordinates().low());
         DEMesher test(cdb, current, offset, sceneScale);
         if (!test.Generate())
             continue;
-        AddTestPolygon(&test, fullArea);
+        AddTestPolygon(&test, fullArea, sceneOrigin);
 
         std::cout << "Origin: " << offset.x << "  " << offset.y << std::endl;
         scenegraph::Scene* tileScene = new scenegraph::Scene(scene.get());
