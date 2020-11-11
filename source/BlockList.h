@@ -21,7 +21,6 @@ THE SOFTWARE.
 ****************************************************************************/
 #pragma once
 
-#include <stdlib.h>
 #include "Edge.h"
 #include <vector>
 
@@ -38,10 +37,10 @@ namespace ctl {
 
 	public:
 	  Block(size_t num)
-	    {
-	      size = num;
-	      data = new T[size];
-	    }
+		{
+		  size = num;
+		  data = new T[size];
+		}
 		~Block(void) { delete [] data; }
 
 		size_t	size;
@@ -58,6 +57,7 @@ namespace ctl {
 	{
 	private:
 		std::vector<Block<T>*> blocks;
+		size_t totalSize = 0;
 
 
 
@@ -71,14 +71,22 @@ namespace ctl {
 
 		void PushBlock(Block<T>* block)
 		{
-			blocks.push_back(block); 
+			if (block)
+			{
+				blocks.push_back(block); 
+				totalSize += block->size;
+			 }
 		}
 
 		void PopBlock(void)
 		{
+			if (blocks.size())
+			{
 			Block<T>* t = blocks.back();
+				totalSize = totalSize - t->size;
 			blocks.pop_back();
 			delete t;
+			 }
 		}
 
 	//	Get data at location i
@@ -98,11 +106,7 @@ namespace ctl {
 
 		size_t size(void) const
 		{
-			size_t size = 0;
-			typedef typename std::vector<Block<T>*>::const_iterator block_iterator;
-			for (block_iterator next = blocks.begin(); next != blocks.end(); next++)
-				size += (*next)->size;
-			return size;
+			return totalSize;
 		}
 	};
 

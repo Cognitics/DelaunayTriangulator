@@ -33,9 +33,9 @@ THE SOFTWARE.
 namespace ctl {
 
 /*!	\class ctl::Subdivision ctl/Subdivision.h ctl/Subdivision.h
- 	\brief Subdivision
+	\brief Subdivision
  
- 	Provides a class for storing Edges and Vertex points assossiated with a quad-edge system. 
+	Provides a class for storing Edges and Vertex points assossiated with a quad-edge system. 
 	Assigns unique IDs to all Vertices and Edges  and stores them in lists using they ID values as index values into the lists. 
 	Automatically cleans up and used memory by all Vertices and Edges owned by it upon destruction.
 	Stores Edges and Vertices as blocks of data. When an Edge or Vertex is "deleted" it it instead flagged as inactive
@@ -43,7 +43,7 @@ namespace ctl {
 	fragmentation.
 
 	Based on Guibus and Stolfi's quad-edge stucture and the code presented in Graphics Gems IV (Paul S. Heckbert).
- 	\sa Guibus and Stolfi (1985 p.96)
+	\sa Guibus and Stolfi (1985 p.96)
 	\sa Graphics Gems IV (Paul S. Heckbert pg. 51)
  */
 	class Subdivision
@@ -80,8 +80,8 @@ namespace ctl {
 		int getNumVerts(void) const;
 
 /*!	\brief Return the Vertex with ID id in this Subdivision.
- 	\param id ID value of Vertex to retrieve.
- 	\return Vertex with ID value of id, NULL if that Vertex doesn't exist
+	\param id ID value of Vertex to retrieve.
+	\return Vertex with ID value of id, NULL if that Vertex doesn't exist
 */
 		Vertex* getVertex(ID id);
 
@@ -110,8 +110,8 @@ namespace ctl {
 		int getNumEdges(void) const;
 
 /*!	\brief Return the Edge with ID id in this Subdivision.
- 	\param id ID value of Edge to retrieve.
- 	\return Edge with ID value of id, NULL if that Edge doesn't exist.
+	\param id ID value of Edge to retrieve.
+	\return Edge with ID value of id, NULL if that Edge doesn't exist.
 */
 		Edge* getEdge(ID id);
 
@@ -131,11 +131,11 @@ namespace ctl {
 		void RemoveEdge(Edge* edge);
 
 /*!	\brief Connects the destination of a to the origin of b.
- 	Add a new Edge connecting the destination of a to the origin of b, in such a way that all three
- 	have the same left face after the connection is complete.
- 	\param a Destination of which will be the origin of the new Edge.
- 	\param b Origin of which will be the destination of the new Edge.
- 	\return A new Edge from the desination of a to the origin of b, NULL if not enough memory.
+	Add a new Edge connecting the destination of a to the origin of b, in such a way that all three
+	have the same left face after the connection is complete.
+	\param a Destination of which will be the origin of the new Edge.
+	\param b Origin of which will be the destination of the new Edge.
+	\return A new Edge from the desination of a to the origin of b, NULL if not enough memory.
 */
 		Edge* Connect(Edge* a, Edge* b);
 

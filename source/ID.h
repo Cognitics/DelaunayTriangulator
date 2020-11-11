@@ -75,7 +75,7 @@ on the next call to getID().
 		unsigned int numFreeIDs(void) const;
 
 		// get the next id (highest available, not a replacement)
-		unsigned int peekNextID(void);
+		unsigned int peekNextID(void) const;
 	};
 
 }

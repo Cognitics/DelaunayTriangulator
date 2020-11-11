@@ -65,7 +65,7 @@ namespace ctl {
 	  return (unsigned int)(AvailableIDs.size()) - 1;
 	}
 
-	unsigned int IDGenerator::peekNextID(void)
+	unsigned int IDGenerator::peekNextID(void) const
 	{
 		return AvailableIDs[0];
 	}

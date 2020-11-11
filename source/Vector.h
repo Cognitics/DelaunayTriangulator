@@ -73,6 +73,7 @@ namespace ctl {
 /*	Equal check with epsilon	*/
 		bool equals(Vector& other, double epsilon) const;
 
+		void set(double x, double y, double z);
 	};
 
 	Vector operator*(double a, const Vector& b);

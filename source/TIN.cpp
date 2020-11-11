@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include "Util.h"
 #include <map>
 #include <set>
+
 namespace ctl {
 
 	struct TriangleKey {
@@ -83,11 +84,11 @@ namespace ctl {
 	void TIN::CreateFromDT(DelaunayTriangulation* DT, const std::vector<Edge*> &triangle_edges)
 	{
 		const Subdivision* graph = DT->GetSubdivision();
-		verts.resize(graph->getNumVerts());
-		normals.resize(graph->getNumVerts());
+		verts.resize(graph->getMaxVerts());
+		normals.resize(graph->getMaxVerts());
 
 		ID invalid = graph->getMaxEdges();
-		IDList VertexIDMap(graph->getNumEdges(),invalid);
+		IDList VertexIDMap(invalid,invalid);
 
 		int nextIndex = 0;
 		for (unsigned int i = 0 ; i < triangle_edges.size(); i++)
