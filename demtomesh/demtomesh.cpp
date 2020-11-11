@@ -960,8 +960,6 @@ bool DEMesher::Generate()
         return false;
 
     auto fileName = _root+_tile.getFilename(".tif");
-    OGRSpatialReference oSRS; // GDAL reference system
-    oSRS.SetWellKnownGeogCS("WGS84");
     Coordinates sw = _tile.getCoordinates().low();
     Coordinates ne = _tile.getCoordinates().high();
     Coordinates nw (ne.latitude().value(), sw.longitude().value());
@@ -1100,18 +1098,8 @@ void DEMesher::Triangulate(scenegraph::Scene* scene)
     for (; y <= _qSize-1; y++)
         AddToContour(x, y);
 
-    ctl::DelaunayTriangulation dt(boundary, ctl::Point(0,0,0));
+    ctl::DelaunayTriangulation dt(boundary, ctl::Point(0,0,0), 5000);
     dt.Disable(dt.CLIPPING);
-    if (_polygonFollowTerrain)
-    {
-        dt.Enable(dt.INTERPOLATE_EDGES);
-        dt.Enable(dt.INTERPOLATE_FACES);
-    }
-    else
-    {
-        dt.Disable(dt.INTERPOLATE_EDGES);
-        dt.Disable(dt.INTERPOLATE_FACES);
-    }
 
     int failedPoints = 0;
     if (!dt.InsertConstrainedLineString(contour)) 
@@ -1125,6 +1113,11 @@ void DEMesher::Triangulate(scenegraph::Scene* scene)
                 auto p = ctl::Point(x, y, _elev.Elevation(y, x));
                 dt.InsertWorkingPoint(p);
             }
+    if (_polygonFollowTerrain)
+    {
+        dt.Enable(dt.INTERPOLATE_EDGES);
+        dt.Enable(dt.INTERPOLATE_FACES);
+    }
     int subsample = _nominalTileSize / (_qSize-1);
     for (auto& polygon : _polygons)
     {
@@ -1493,9 +1486,9 @@ int main(int argc, char **argv)
         // Calculate distance to the origin of the new tile
         ctl::Point offset = ConvertGeoToTileUnits(lod, sceneOrigin, current.getCoordinates().low());
         DEMesher test(cdb, current, offset, sceneScale);
+        AddTestPolygon(&test, fullArea, sceneOrigin);
         if (!test.Generate())
             continue;
-        AddTestPolygon(&test, fullArea, sceneOrigin);
 
         std::cout << "Origin: " << offset.x << "  " << offset.y << std::endl;
         scenegraph::Scene* tileScene = new scenegraph::Scene(scene.get());
