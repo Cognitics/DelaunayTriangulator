@@ -32,11 +32,11 @@ THE SOFTWARE.
 namespace ctl {
 
 /*!	\class ctl::Vertex ctl/Vertex.h ctl/Vertex.h
- 	\brief Vertex
+	\brief Vertex
  
- 	ID		Unique ID value for this Vertex.
- 	Point	Location of this Vertex.
- 	Edges	Edges radiating outword from this Vertex.
+	ID		Unique ID value for this Vertex.
+	Point	Location of this Vertex.
+	Edges	Edges radiating outword from this Vertex.
  
 */
 	class Vertex

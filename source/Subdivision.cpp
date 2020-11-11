@@ -38,7 +38,7 @@ namespace ctl {
 //!    Allocate more memory for Edges
 	void Subdivision::allocEdges(void)
 	{
-		int start = getMaxEdges();
+		int start = int(edges.size()/4);
 		Block<Edge>* _edges = new Block<Edge>(4*resizeIncriment);
 		edges.PushBlock(_edges);
 		edgeFlags.resize(start + resizeIncriment, false);
@@ -65,7 +65,7 @@ namespace ctl {
 
 	int Subdivision::getMaxVerts(void) const
 	{
-		return int(vertFlags.size());
+		return vertIDGen.peekNextID();
 	}
 
 	int Subdivision::getNumVerts(void) const {
@@ -78,9 +78,9 @@ namespace ctl {
 
 	Vertex* Subdivision::getRandomVertex(void)
 	{
-		int max = getNumVerts();
-		if (max == 0) return NULL;
+		if (getNumVerts() == 0) return NULL;
 
+		int max = getMaxVerts();
 		int n = rand()%max;
 		for (int i = 0; i < max; i++)
 		{
@@ -96,7 +96,7 @@ namespace ctl {
 	Vertex* Subdivision::CreateVertex(Point point)
 	{
 		ID id = vertIDGen.getID();
-		if (int(id) >= getMaxVerts())
+		if (int(id) >= verts.size())
 			allocVerts();
 		vertFlags[id] = true;
 		Vertex* vert = verts[id];
@@ -125,7 +125,7 @@ namespace ctl {
 	}
 
 	int Subdivision::getMaxEdges(void) const {
-		return int(edgeFlags.size());
+		return edgeIDGen.peekNextID();
 	}
 
 	int Subdivision::getNumEdges(void) const {
@@ -138,9 +138,9 @@ namespace ctl {
 
 	Edge* Subdivision::getRandomEdge(void)
 	{
-		int max = getNumEdges();
-		if (max == 0) return NULL;
+		if (getNumEdges() == 0) return NULL;
 
+		int max = getMaxEdges();
 		int n = rand()%max;
 		for (int i = 0; i < max; i++)
 		{
@@ -156,7 +156,7 @@ namespace ctl {
 	Edge* Subdivision::CreateEdge(Vertex* a, Vertex* b)
 	{
 		ID id = edgeIDGen.getID();
-		if (int(id) >= getMaxEdges())
+		if (int(4*id) >= edges.size())
 			allocEdges();
 		edgeFlags[id] = true;
 		Edge* e0 = edges[ 4*id + 0 ];
