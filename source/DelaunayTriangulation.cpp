@@ -66,19 +66,6 @@ namespace ctl {
 	DelaunayTriangulation::DelaunayTriangulation
 	(
 		PointList			boundary,
-		int                    resizeIncriment,
-		double                epsilon,
-		double                areaEpsilon,
-		int                    maxEdgeFlips,
-		int                    settings
-	) :
-		DelaunayTriangulation(boundary, (boundary.size() ? boundary[0] : ctl::Point(0, 0, 0)),
-			resizeIncriment, epsilon, areaEpsilon, maxEdgeFlips, settings) {}
-
-	DelaunayTriangulation::DelaunayTriangulation
-	(
-		PointList            boundary,
-		Point                origin,
 		int					resizeIncriment,
 		double				epsilon,
 		double				areaEpsilon,
@@ -94,7 +81,7 @@ namespace ctl {
 		error_			= 0;
 
 	// transform to local coordinates
-		origin_ = origin;
+		origin_ = boundary.size()>0 ? boundary[0] : ctl::Point(0,0,0);
 		for (size_t i = 0; i < boundary.size(); i++)
 			boundary[i] = TransformPointToLocal(boundary[i]);
 
@@ -1557,7 +1544,11 @@ namespace ctl {
 		else if (location.getType() == LR_FACE)
 			result = InsertPointInFace(p,location.getEdge());
 		else if (location.getType() == LR_VERTEX)
+		{
 			result = location.getEdge()->Org();
+			result->point.z = p.z; // Need to set the proper Z
+			return result; // Do not add to bsp -already included
+		}
 		if(result)
 			bsp->addVertex(result);
 		return result;

@@ -331,16 +331,6 @@ namespace ctl {
 			int					settings		=	CLIPPING
 		);
 
-		DelaunayTriangulation
-		(
-			PointList            boundary,
-			Point                origin,
-			int                  resizeIncriment    =    100000,
-			double               epsilon            =    1e-6,
-			double               areaEpsilon        =    3e-5,
-			int                  maxEdgeFlips    =    10000,
-			int                  settings        =    CLIPPING
-		);
 		~DelaunayTriangulation(void);
 
 		// this removes the boundary vertices so that we can simplify to working points
