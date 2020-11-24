@@ -32,20 +32,21 @@ namespace ctl {
 		Vector u = b - a;
 		Vector v = p - a;
 
-		double du = u.length2D();
+		double du = abs(u.x) + abs(u.y); // Absolute value norm for distance
 		// Avoid the division and handle gracefully aligned points
 		double area = (v.x*u.y - v.y*u.x);
 
 		// if area/du < -epsilon return PL_LEFT_OF_LINE
-		if ((du>0 && area<-du*epsilon) || (du<0 && -area<du*epsilon))
+		if (area<-du*epsilon)
 			return PL_LEFT_OF_LINE;
 
 		// if (area/du > epsilon) return PL_RIGHT_OF_LINE
-		if ((du>0 && area>du*epsilon) || (du<0 && -area>-du*epsilon))
+		if (area>du*epsilon)
 			return PL_RIGHT_OF_LINE;
 		{
-			double da = v.length2D();
-			double db = (p - b).length2D();
+			double da = abs(v.x) + abs(v.y);
+			Vector w = p - b;
+			double db = abs(w.x) + abs(w.y);
 
 			if (da < epsilon) return PL_BEGINS_LINE;
 			else if (db < epsilon) return PL_ENDS_LINE;
@@ -60,13 +61,10 @@ namespace ctl {
 		Vector u = b - a;
 		Vector v = p - a;
 
-		double du = u.length2D();
+		double du = abs(u.x) + abs(u.y); // Absolute value norm for distance
 		// Avoid the division and handle gracefully aligned points
 		double area = (v.x*u.y - v.y*u.x);
-		if (du > 0)
-			return area < -du*epsilon;
-		else
-			return -area < du*epsilon;
+		return area < -du*epsilon;
 
 //        return area/du < -epsilon;
 	}
@@ -76,15 +74,12 @@ namespace ctl {
 		Vector u = b - a;
 		Vector v = p - a;
 
-		double du = u.length2D();
+		double du = abs(u.x) + abs(u.y); // Absolute value norm for distance
 
 		// Avoid the division to handle gracefully aligned points
 		double area = (v.x*u.y - v.y*u.x);
 
-		if (du>0)
-			return abs(area) <= du*epsilon;
-		else
-			return abs(area) <= -du*epsilon;
+		return abs(area) <= du*epsilon;
 		// return abs(area/du) <= epsilon;
 	}
 
@@ -93,14 +88,11 @@ namespace ctl {
 		Vector u = b - a;
 		Vector v = p - a;
 
-		double du = u.length2D();
+		double du = abs(u.x) + abs(u.y); // Absolute value norm for distance
 
 		// Avoid the division and handle gracefully aligned points
 		double area = (v.x*u.y - v.y*u.x);
-		if (du > 0)
-			return area > du*epsilon;
-		else
-			return -area > -du*epsilon;
+		return area > du*epsilon;
 
 //        return (area/du) > epsilon;
 	}

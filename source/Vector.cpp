@@ -161,9 +161,7 @@ namespace ctl {
 		}
 		else
 		{
-			double dx = x - other.x;
-			double dy = y - other.y;
-			double dist = sqrt(dx*dx + dy*dy);
+			double dist = std::abs(x-other.x) + std::abs(y-other.y); // Use L1 norm
 			return dist < epsilon;
 		}
 	}
