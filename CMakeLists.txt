@@ -42,3 +42,5 @@ set(CTL_SOURCES
 	)
 
 add_executable(simple_example ${CTL_SOURCES} ${CTL_HEADERS} "examples/simple/delaunay_simple.cpp")
+
+add_library(ctltriangulator SHARED ${CTL_SOURCES} ${CTL_HEADERS} "source/DelaunayTriangulationWrapper.cpp")
