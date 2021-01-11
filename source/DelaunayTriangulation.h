@@ -47,7 +47,7 @@ namespace ctl {
 		std::list<Vertex *> vertices;
 
 		~DelaunayBSP(void);
-		DelaunayBSP(PointList boundary);
+		DelaunayBSP(const PointList &boundary);
 		DelaunayBSP(const Point &minPoint, const Point &maxPoint, size_t depth, bool vertical);
 
 		void addVertex(Vertex *vertex);
@@ -56,18 +56,18 @@ namespace ctl {
 
 
 /*!	\class ctl::DelaunayTriangulation ctl/DelaunayTriangulation.h ctl/DelaunayTriangulation.h
- 	\brief DelaunayTriangulation
- 	
- 	Provides a Dynamically Constrained Delaunay Triangulation system. Based on an incrimental Delaunay Triangulation algorithm
- 	with the added feature of constraint insertion and removal. Capable of creating a point only Delaunay Triangulation in O(n^4/3) time
+	\brief DelaunayTriangulation
+	
+	Provides a Dynamically Constrained Delaunay Triangulation system. Based on an incrimental Delaunay Triangulation algorithm
+	with the added feature of constraint insertion and removal. Capable of creating a point only Delaunay Triangulation in O(n^4/3) time
 	( provided the points are inserted randomly - worst case time is n^2 and is encounted when inserting points of a grid in order, to counter
 	this worst case behaviour an even faster algorithm for generating DelaunayTringulations from a grid is provided).
 
 
 
- 	DelaunayTriangulation Construction:
+	DelaunayTriangulation Construction:
 
- 	When creating a DelaunayTriangulation a few options must be specified.
+	When creating a DelaunayTriangulation a few options must be specified.
 
 	BoundingRegion:		A DelaunayTriangulation must be initially constrainted to some bounding region (in this implementation a quad).
 						This must be specified by the user upon construction.
@@ -82,19 +82,19 @@ namespace ctl {
 						result in less unused allocated memory at any given time, but result in longer processing times since more blocks must be managed.
 						Default to (100)
  
- 	Epsilon:			A custom epsilon can be defined for comparisons in this DelaunayTriangulation. If the epsilon is set too small, some rounding
+	Epsilon:			A custom epsilon can be defined for comparisons in this DelaunayTriangulation. If the epsilon is set too small, some rounding
 						errors can lead to crashes or infinite loops. The default has been tested to work for a large number of cases. If undesired
 						results are present, try increasing the epsilon slightly.
- 						Default to (3e-13).
+						Default to (3e-13).
  
- 	MaxEdgeFlips:		The maximum number of Edge flips that will be performed for any call to FlipEdges by the DelaunayTriangulation.
- 						This is important because a Constrained Delaunay Triangulation is not garunteed to be Delaunay since many Edges are
- 						restricted from Edge flips and no extra Vertices (other than intersection points) are created. With this in mind
- 						it is possible for the EdgeFlips to ripple outward from a new constraint for many itterations (which get increasingly
- 						worse with a DelaunayTriangulation with many Edges). To avoid this, MaxEdgeFlips is specified which will constrain
- 						the number of flips the DelaunayTriangulation will use in an attempt to correct the triangulation after inserting a new
- 						constraint.
- 						Defaults to (10000).
+	MaxEdgeFlips:		The maximum number of Edge flips that will be performed for any call to FlipEdges by the DelaunayTriangulation.
+						This is important because a Constrained Delaunay Triangulation is not garunteed to be Delaunay since many Edges are
+						restricted from Edge flips and no extra Vertices (other than intersection points) are created. With this in mind
+						it is possible for the EdgeFlips to ripple outward from a new constraint for many itterations (which get increasingly
+						worse with a DelaunayTriangulation with many Edges). To avoid this, MaxEdgeFlips is specified which will constrain
+						the number of flips the DelaunayTriangulation will use in an attempt to correct the triangulation after inserting a new
+						constraint.
+						Defaults to (10000).
 	
 	Options:			Additional Options may be specified or enabled for this DelaunayTriangulation (several options may be | together). 
 						The Options allowed are:
@@ -117,10 +117,10 @@ namespace ctl {
 
 	Constraints:
  
- 		A constraint is defined as a single Point or a single list of Points that form a line string. When a constraint is inserted into the DT it will force 
+		A constraint is defined as a single Point or a single list of Points that form a line string. When a constraint is inserted into the DT it will force 
 		all the segments of the constraint to appear in the DT regardless if they are Delaunay or not.
 	 
- 		If two constraints are found to intersect or overlap one another, a new Vertex point will be generated at the intersection and placed into the DT to 
+		If two constraints are found to intersect or overlap one another, a new Vertex point will be generated at the intersection and placed into the DT to 
 		ensure that both constraints are satisfied. Note that this new Vertex will have a z value determined based on the ZInterpolationOption settings. Upon
 		removing one of the overlapping constraints, if it is found that the newly created Vertex is no longer necessary, the Vertex will be removed and the
 		DelaunayTriangulation will be simplified.
@@ -411,8 +411,8 @@ namespace ctl {
 //!	\return The nearest Point in this DelaunayTriagulation. Returns the same point is outside of this DelaunayTriangulation
 		Point GetNearestPoint(Point point);
 
-//!	\return The z value of this Point within this DelaunayTriangulation. Interpolated based on the closest Edge or Face. 0 if outside.
-		double GetZValue(Point point);
+//!    \return The z value of this Point within this DelaunayTriangulation. Interpolated based on the closest Edge or Face. Default if outside
+		double GetZValue(Point point, double outsideZ = 0);
 
 /******************************************************************************************************
 	INSERTION AND REMOVAL
@@ -426,7 +426,7 @@ namespace ctl {
 		void InsertWorkingPoint(Point point);
 
 //!	\brief Remove all working points that are inside the given polygon. Removes ALL working points in the polygon is empty.
-		void RemoveWorkingPoints(PointList polygon);
+		void RemoveWorkingPoints(const PointList &polygon);
 
 /*!	\brief Inserts a new Point into the DelaunayTriangulation and Constrains the Point.
 	\return ConstraintID of the inserted Point. 0 if the point could not be inserted.
@@ -518,9 +518,13 @@ namespace ctl {
 *******************************************************************************************************/
 	protected:
 		void GatherConstraintEdges(Edge* edge, std::vector<Edge*>& edges, bool* marked, ID constraintID);
-		std::vector<Edge*> GetCrossingEdges(Vertex* a, Vertex* b);
+//!  \brief Collects all the edges that cross a line between vertics a and b
+//         It can select constrained and/or unconstrained edges
+		std::vector<Edge*> GetCrossingEdges(Vertex* a, Vertex* b, bool bound, bool unbound);
 		std::vector<Vertex*> GetTouchingVerts(Vertex* a, Vertex* b);
 
+//!  \brief Collects all the vertices, it can select the working and/or the constrained vertices.
+		std::vector<Vertex*> GatherVertsLocal(const PointList &polygon, bool constrained, bool working);
 	public:
 
 //!	\return Returns all vertices. If a non-empty polygon is given, only vertices inside it will be returned.
@@ -549,8 +553,8 @@ namespace ctl {
 		bool IsFlipValid(Edge* edge);
 		bool IsDelaunay(Vector p, Edge* edge);
 		bool IsInside(Point point);
-		bool IsInside(PointList points);
-		bool Touches(PointList points);
+		bool IsInside(const PointList &points);
+		bool Touches(const PointList &points);
 
 /******************************************************************************************************
 	SUBDIVISION INTERFACE

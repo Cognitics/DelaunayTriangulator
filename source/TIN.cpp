@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include "Util.h"
 #include <map>
 #include <set>
+
 namespace ctl {
 
 	struct TriangleKey {

@@ -20,8 +20,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ****************************************************************************/
 #include "Util.h"
-#include <math.h>
-#include <stdlib.h>
 
 namespace ctl {
 
@@ -34,17 +32,21 @@ namespace ctl {
 		Vector u = b - a;
 		Vector v = p - a;
 
-		double du = u.length2D();
-		double d = (v[0]*u[1] - v[1]*u[0])/du;
+		double du = abs(u.x) + abs(u.y); // Absolute value norm for distance
+		// Avoid the division and handle gracefully aligned points
+		double area = (v.x*u.y - v.y*u.x);
 
-		if (d < -epsilon)
+		// if area/du < -epsilon return PL_LEFT_OF_LINE
+		if (area<-du*epsilon)
 			return PL_LEFT_OF_LINE;
-		else if (d > epsilon)
+
+		// if (area/du > epsilon) return PL_RIGHT_OF_LINE
+		if (area>du*epsilon)
 			return PL_RIGHT_OF_LINE;
-		else
 		{
-			double da = v.length2D();
-			double db = (p - b).length2D();
+			double da = abs(v.x) + abs(v.y);
+			Vector w = p - b;
+			double db = abs(w.x) + abs(w.y);
 
 			if (da < epsilon) return PL_BEGINS_LINE;
 			else if (db < epsilon) return PL_ENDS_LINE;
@@ -59,10 +61,12 @@ namespace ctl {
 		Vector u = b - a;
 		Vector v = p - a;
 
-		double du = u.length2D();
-		double d = (v[0]*u[1] - v[1]*u[0])/du;
+		double du = abs(u.x) + abs(u.y); // Absolute value norm for distance
+		// Avoid the division and handle gracefully aligned points
+		double area = (v.x*u.y - v.y*u.x);
+		return area < -du*epsilon;
 
-		return d < -epsilon;
+//        return area/du < -epsilon;
 	}
 
 	bool IsOn(const Point& p, const Point& a, const Point& b, double epsilon)
@@ -70,10 +74,13 @@ namespace ctl {
 		Vector u = b - a;
 		Vector v = p - a;
 
-		double du = u.length2D();
-		double d = (v[0]*u[1] - v[1]*u[0])/du;
+		double du = abs(u.x) + abs(u.y); // Absolute value norm for distance
 
-		return abs(d) <= epsilon;
+		// Avoid the division to handle gracefully aligned points
+		double area = (v.x*u.y - v.y*u.x);
+
+		return abs(area) <= du*epsilon;
+		// return abs(area/du) <= epsilon;
 	}
 
 	bool IsRight(const Point& p, const Point& a, const Point& b, double epsilon)
@@ -81,10 +88,13 @@ namespace ctl {
 		Vector u = b - a;
 		Vector v = p - a;
 
-		double du = u.length2D();
-		double d = (v[0]*u[1] - v[1]*u[0])/du;
+		double du = abs(u.x) + abs(u.y); // Absolute value norm for distance
 
-		return d > epsilon;
+		// Avoid the division and handle gracefully aligned points
+		double area = (v.x*u.y - v.y*u.x);
+		return area > du*epsilon;
+
+//        return (area/du) > epsilon;
 	}
 
 /******************************************************************************************************
@@ -116,15 +126,20 @@ namespace ctl {
 /******************************************************************************************************
 	POLYGON OPERATIONS
 *******************************************************************************************************/
-	bool PointInPolygon(const Point &p, const PointList &polygon, double epsilon)
+	bool PointInPolygon(Point p, const PointList &polygon, double epsilon)
 	{
 		int Rcross = 0;
 		int Lcross = 0;
 
-		for (unsigned int i = 1; i < polygon.size(); i++)
+		// If the polygon is not closed, add a new edge from the last to the first point
+		int n = int(polygon.size());
+		if ((n>0) && !(polygon[0]==polygon.back()))
+			n++;
+		for (int i = 1; i < n; i++)
 		{
 			Point p1 = polygon[i-1];
-			Point p2 = polygon[i];
+			int pointIndex = i < polygon.size() ? i : 0;
+			Point p2 = polygon[pointIndex];
 
 			if ( p.x == p1.x && p.y == p1.y) return true;
 
@@ -132,27 +147,27 @@ namespace ctl {
 			double	x;
 			bool	Rstrad, Lstrad;
 
-            //Rstrad is false if the point only touches ray, but is mostly below it				
-            //Lstrad is false if the point only touches ray, but is mostly above it
-            Rstrad = ( p2.y > height - epsilon ) != ( p1.y > height - epsilon );				
-            Lstrad = ( p2.y < height + epsilon ) != ( p1.y < height + epsilon );
+			//Rstrad is false if the point only touches ray, but is mostly below it				
+			//Lstrad is false if the point only touches ray, but is mostly above it
+			Rstrad = ( p2.y > height - epsilon ) != ( p1.y > height - epsilon );				
+			Lstrad = ( p2.y < height + epsilon ) != ( p1.y < height + epsilon );
 
-            if (Rstrad || Lstrad)
-            {
-                x = ( (p2.x - p.x)*(p1.y - height) - (p1.x - p.x)*(p2.y - height) ) 
-	                / ( p1.y - p2.y );
-                if ( Rstrad && x > epsilon ) Rcross++;
-                if ( Lstrad && x < -epsilon ) Lcross++;
+			if (Rstrad || Lstrad)
+			{
+				x = ( (p2.x - p.x)*(p1.y - height) - (p1.x - p.x)*(p2.y - height) ) 
+					/ ( p1.y - p2.y );
+				if ( Rstrad && x > epsilon ) Rcross++;
+				if ( Lstrad && x < -epsilon ) Lcross++;
 			//	Point is on polygons edge
 				if (abs(x) < epsilon)
 					return true;
-            }
+			}
 		}
 
 	//check cross countings to determine intersection
-        if ( (Rcross % 2) != (Lcross % 2) )		return true;
-        else if ( (Rcross % 2) == 1 )			return true;
-        else									return false;
+		if ( (Rcross % 2) != (Lcross % 2) )		return true;
+		else if ( (Rcross % 2) == 1 )			return true;
+		else									return false;
 	}
 
 	PointList ClipToLine(const PointList &polygon, Point a, Point b, double epsilon)
@@ -198,15 +213,20 @@ namespace ctl {
 
 	PointList ClipToPolygon(PointList polygon, const PointList &convex_region, double epsilon)
 	{
-		for (int i = 1; i < int(convex_region.size()); i++)
+		int n = int(convex_region.size());
+		for (int i = 1; i < n; i++)
 			polygon = ClipToLine(polygon,convex_region[i-1],convex_region[i],epsilon);
+
+		// If the convex region is open, just add one additional point
+		if ((n>1) && !(convex_region[0]==convex_region.back()))
+			polygon = ClipToLine(polygon, convex_region[n-1], convex_region[0], epsilon);
 		return polygon;
 	}
 
 	double PArea2D(const PointList& contour)
 	{
 		double area = 0;
-		int n = contour.size();
+		int n = int(contour.size());
 		for (int i=0; i<n-1; i++)
 			area += (contour[i][0] + contour[i+1][0])*(contour[i][1] - contour[i+1][1]);
 		return area / 2.0;

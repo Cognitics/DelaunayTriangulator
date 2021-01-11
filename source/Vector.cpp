@@ -45,7 +45,7 @@ namespace ctl {
 		case 1: return y;
 		case 2: return z;
 		default:
-            throw std::runtime_error("Vector::operator[] Index out of bounds!");
+			throw std::runtime_error("Vector::operator[] Index out of bounds!");
 		}
 	}
 
@@ -161,9 +161,7 @@ namespace ctl {
 		}
 		else
 		{
-			double dx = x - other.x;
-			double dy = y - other.y;
-			double dist = sqrt(dx*dx + dy*dy);
+			double dist = std::abs(x-other.x) + std::abs(y-other.y); // Use L1 norm
 			return dist < epsilon;
 		}
 	}
@@ -187,4 +185,10 @@ namespace ctl {
 		return a.x*b.x + a.y*b.y + a.z*b.z;
 	}
 
+	void Vector::set(double x, double y, double z)
+	{
+		this->x = x;
+		this->y = y;
+		this->z = z;
+	}
 }

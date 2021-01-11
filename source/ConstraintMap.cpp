@@ -29,7 +29,7 @@ namespace ctl {
 	ID ConstraintMap::GetNextConstraintID(void)
 	{
 		ID id = id_generator.getID();
-		Constraint_To_Vertex.resize(std::max<ID>(Constraint_To_Vertex.size(),id+1),-1);
+        Constraint_To_Vertex.resize(std::max<ID>((ID)Constraint_To_Vertex.size(),id+1),-1);
 		return id;
 	}
 

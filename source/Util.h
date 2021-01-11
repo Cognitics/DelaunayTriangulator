@@ -30,19 +30,20 @@ namespace ctl {
 *******************************************************************************************************/
 	enum PointLineLocation 
 	{
-		PL_BEFORE_LINE,
-		PL_BEGINS_LINE,
-		PL_ON_LINE,
-		PL_ENDS_LINE,
-		PL_AFTER_LINE,
-		PL_LEFT_OF_LINE,
-		PL_RIGHT_OF_LINE
+		PL_BEFORE_LINE = 0,
+		PL_BEGINS_LINE = 1,
+		PL_ON_LINE = 2,
+		PL_ENDS_LINE = 3,
+		PL_AFTER_LINE = 4,
+		PL_LEFT_OF_LINE = 5,
+		PL_RIGHT_OF_LINE = 6
 	};
 
 	PointLineLocation LocatePointOnLine(const Point& p, const Point& a, const Point& b, double epsilon);
 	bool	IsLeft(const Point& p, const Point& a, const Point& b, double epsilon);
 	bool	IsOn(const Point& p, const Point& a, const Point& b, double epsilon);
 	bool	IsRight(const Point& p, const Point& a, const Point& b, double epsilon);
+	inline bool IsOnLine(PointLineLocation loc) { return loc <= PL_AFTER_LINE; }
 
 /******************************************************************************************************
 	TRIANGLE OPERATIONS
@@ -55,7 +56,7 @@ namespace ctl {
 /******************************************************************************************************
 	POLYGON OPERATIONS
 *******************************************************************************************************/
-	bool	PointInPolygon(const Point &p, const PointList &polygon, double epsilon = 1e-10);
+	bool    PointInPolygon(Point p, const PointList &polygon, double epsilon = 1e-10);
 	PointList ClipToLine(const PointList &polygon, Point a, Point b, double epsilon);
 
 /*

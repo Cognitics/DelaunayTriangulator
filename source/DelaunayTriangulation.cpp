@@ -33,6 +33,7 @@ THE SOFTWARE.
 #include <map>
 #include <list>
 #include <set>
+#include <unordered_set>
 
 #undef min
 #undef max
@@ -79,25 +80,13 @@ namespace ctl {
 		subdivision_	= new Subdivision(resizeIncriment < 10 ? 10 : resizeIncriment);
 		error_			= 0;
 
-	//	transform to local coordinates
-		origin_ = boundary[0];
+	// transform to local coordinates
+		origin_ = boundary.size()>0 ? boundary[0] : ctl::Point(0,0,0);
 		for (size_t i = 0; i < boundary.size(); i++)
 			boundary[i] = TransformPointToLocal(boundary[i]);
 
 		bsp = new DelaunayBSP(boundary);
 
-#if 1
-		double min = 0, max = 0;
-		for (size_t i=0; i<boundary.size(); i++)
-		{
-			const ctl::Point& p = boundary[i];
-			if (p.x < min) min = p.x;
-			if (p.x > max) max = p.x;
-			if (p.y < min) min = p.y;
-			if (p.y > max) max = p.y;
-		}
-		epsilon_ = epsilon;
-#endif
 
 	//	remove duplicate points
 		boundary.reserve(boundary.size());
@@ -124,7 +113,9 @@ namespace ctl {
 		double area = PArea2D(boundary_);
 		if (area > 0)
 			std::reverse(boundary_.begin(), boundary_.end());
-		else if (area == 0)
+		else
+			area = -area;
+		if (area < areaEpsilon_)
 		{
 			//ccl::ObjLog log;
 			//log << ccl::LERR << "(DelaunayTriangulation) Boundary has 0 area." << log.endl;
@@ -221,6 +212,22 @@ namespace ctl {
 /******************************************************************************************************
 	BOUNDARY QUERIES
 *******************************************************************************************************/
+	static void GetBoundingRect(const PointList& polygon, Point& minPoint, Point& maxPoint)
+	{
+		double minX = DBL_MAX;
+		double maxX = -DBL_MAX;
+		double minY = DBL_MAX;
+		double maxY = -DBL_MAX;
+		for(auto &point: polygon)
+		{
+			minX = std::min(minX, point.x);
+			maxX = std::max(maxX, point.x);
+			minY = std::min(minY, point.y);
+			maxY = std::max(maxY, point.y);
+		}
+		minPoint = Point(minX, minY);
+		maxPoint = Point(maxX, maxY);
+	}
 
 	Point DelaunayTriangulation::GetLowerBound(void)
 	{
@@ -345,7 +352,7 @@ namespace ctl {
 		int base = 2*GetNumEdges();
 		if (!rough) // extract excess boundary triangles
 		{
-			for (size_t i = 0; i < subdivision_->getMaxEdges(); i++)
+			for (int i = 0; i < subdivision_->getMaxEdges(); i++)
 			{
 				Edge* e = subdivision_->getEdge(i);
 				if (e && cmap_.IsEdgeBound(e, 0))
@@ -392,13 +399,13 @@ namespace ctl {
 		return nearest;
 	}
 
-	double DelaunayTriangulation::GetZValue(Point point)
+	double DelaunayTriangulation::GetZValue(Point point, double outsideZ)
 	{
 		point = TransformPointToLocal(point);
 
 	//	Out of bounds
 		if (!IsInside(point)) 
-			return 0;
+			return outsideZ;
 
 		double z = 0;
 
@@ -448,7 +455,7 @@ namespace ctl {
 			InsertPoint(point);
 	}
 
-	void DelaunayTriangulation::RemoveWorkingPoints(PointList polygon)
+	void DelaunayTriangulation::RemoveWorkingPoints(const PointList &polygon)
 	{
 		if (error_)
 			return;
@@ -490,11 +497,7 @@ namespace ctl {
 		if (!IsInside(constraint))
 		{
 			if (Enabled(CLIPPING))
-			{
-				PointList clipping_region = boundary_;
-				clipping_region.push_back(clipping_region.front());
-				constraint = ClipToPolygon(constraint,clipping_region,0);
-			}
+				constraint = ClipToPolygon(constraint,boundary_,0);
 			else
 				return 0;
 		}
@@ -516,8 +519,9 @@ namespace ctl {
 			glViewer::Display();
 		}
 #endif
-	//	Insert constraint points
-		std::list<Vertex*> verts_list;
+	// Insert constraint points
+		std::vector<Vertex*> verts;
+		verts.reserve(constraint.size());
 		for (unsigned int i = 0; i < constraint.size(); i++)
 		{
 			Vertex* vert = SnapPointToVertex(constraint[i]);
@@ -546,11 +550,8 @@ namespace ctl {
 #endif
 			if (error_) return 0;
 			if (vert)
-				verts_list.push_back(vert);
+				verts.push_back(vert);
 		}
-		std::vector<Vertex *> verts;
-		verts.resize(verts_list.size());
-		std::copy(verts_list.begin(), verts_list.end(), verts.begin());
 
 		ID constraintID = cmap_.GetNextConstraintID();
 		cmap_.BindVertex(constraintID,verts[0]);
@@ -579,9 +580,7 @@ namespace ctl {
 		{
 			if (Enabled(CLIPPING))
 			{
-				PointList clipping_region = boundary_;
-				clipping_region.push_back(clipping_region.front());
-				constraint = ClipToPolygon(constraint,clipping_region,0);
+				constraint = ClipToPolygon(constraint,boundary_,0);
 			}
 			else
 				return 0;
@@ -609,16 +608,21 @@ namespace ctl {
 		if (error_)
 			return 0;
 
-	//	Gather Verts inside this constraint
-		PointList original;
-		for (size_t i = 0; i < constraint.size(); i++)
-			original.push_back(TransformPointToGlobal(constraint[i]));
-		std::vector<Vertex*> verts = GatherConstrainedVerts(original);
+		//   Gather Verts inside this constraint. The working vertices are simplified
+		//   There are two ways to define the Z of the constrained vertices
+		//      -set the polygon vertices to the Z of the grid. This is done if
+		//        INTERPOLATE_EDGES and INTERPOLATE_FACES are enabled
+		//      -set all the vertices to the Z of the polygon. If 
+		//       INTERPOLATE_EDGES and INTERPOLATE_FACES are disabled
+		bool usePolygonZ = !Enabled(INTERPOLATE_EDGES);
+		std::vector<Vertex*> verts = GatherVertsLocal(constraint, usePolygonZ, true);
 
 		if (error_)
 			return 0;
 
-	//	Find basis of the polygon list
+		if (usePolygonZ)
+		{
+	// Find basis of the polygon list
 		Point O = constraint[0];
 		Vector U = constraint[1] - constraint[0];
 		Vector V;
@@ -626,12 +630,17 @@ namespace ctl {
 		for (unsigned int i = 2; i < constraint.size(); i++)
 		{
 			V = constraint[i] - constraint[0];
-			if ( abs(V.cross(U).z) > epsilon_ ) break;
+			if (std::abs(U.cross(V).z) > areaEpsilon_)
+				break;
 		}
 
 		for (unsigned int i = 0; i < verts.size(); i++)
+				InterpolateZ(O, U, V, verts[i]);
+		}
+		// Remove unconstrained vertices inside the polygon
+		// AFTER Z has been set in case the simplification needs Z
+		for (unsigned int i = 0; i < verts.size(); i++)
 		{ 
-			InterpolateZ(O,U,V,verts[i]);
 			SimplifyEdges(verts[i]);
 			if (error_) return 0;
 		}
@@ -880,8 +889,8 @@ namespace ctl {
 		while (edge != start);
 	}
 
-//!	Gather all edges that cross the line between a and b
-	std::vector<Edge*> DelaunayTriangulation::GetCrossingEdges(Vertex* a, Vertex* b)
+//!    Gather all edges that cross the line between a and b
+	std::vector<Edge*> DelaunayTriangulation::GetCrossingEdges(Vertex* a, Vertex* b, bool bound, bool unbound)
 	{
 		std::vector<Edge*> edges;
 
@@ -889,10 +898,18 @@ namespace ctl {
 		int iteration = 0;
 		int iteration_limit = GetNumEdges();
 
+		auto EdgeNeeded = [&](Edge* e)-> bool
+		{
+			return e != nullptr &&
+				   ((bound && unbound) ||
+					(bound && cmap_.IsEdgeBound(e)) ||
+					(unbound && !cmap_.IsEdgeBound(e)));
+		};
+
 		Point alpha = a->point;
 		Point beta = b->point;
-		Edge* e = GetLeftEdge(a,b->point);
-		while(e->Dest() != b)
+		Edge* e = GetLeftEdge(a,beta);
+		while(e!=nullptr && e->Dest() != b)
 		{
 			if (iteration++ > iteration_limit)
 			{
@@ -900,12 +917,14 @@ namespace ctl {
 				break;
 			}
 
-		//	Search
-			if ( IsLeft(e->Dest()->point,alpha,beta) )
+		// Search
+			PointLineLocation loc = ctl::LocatePointOnLine(e->Dest()->point,alpha,beta, epsilon_);
+			if(loc==PL_LEFT_OF_LINE)
 				e = e->Rprev();
-			else if ( IsRight(e->Dest()->point,alpha,beta) )
+			else if(loc==PL_RIGHT_OF_LINE)
 			{
-				edges.push_back(e);
+				if(EdgeNeeded(e))
+					 edges.push_back(e);
 				e = e->Onext();
 			}
 			else 
@@ -924,23 +943,24 @@ namespace ctl {
 			//log << "DelaunayTriangulation::GetCrossingEdges() Smart search failed, reverting to brute force." << log.endl;
 
 			edges.clear();
-			Point ba = b->point - a->point;
+			Point ba = beta - alpha;
 			for (int i = 0; i < subdivision_->getMaxEdges(); i++)
 			{
 				Edge* edge = subdivision_->getEdge(i);
-				if (edge)
+				if (EdgeNeeded(edge))
 				{
-					if (IsOn(edge->Org()->point, a->point, b->point) || IsOn(edge->Dest()->point, a->point, b->point))
+					// If the edge vertices fall on the line, it does not cross the line
+					if (IsOn(edge->Org()->point, alpha, beta)!=-1 || IsOn(edge->Dest()->point, alpha, beta)!=-1)
 						continue;
 					Point dc = edge->Dest()->point - edge->Org()->point;
-					float denom = (dc.x*ba.y - ba.x*dc.y);
+					float denom = float(dc.x*ba.y - ba.x*dc.y);
 					if (denom)
 					{
-						Point ca = edge->Org()->point - a->point;
-						float s = (dc.x*ca.y - ca.x*dc.y) / denom;
+						Point ca = edge->Org()->point - alpha;
+						float s = float(dc.x*ca.y - ca.x*dc.y) / denom;
 						if (s < 0 || s > 1)
 							continue;
-						float t = (ba.x*ca.y - ca.x*ba.y) / denom;
+						float t = float(ba.x*ca.y - ca.x*ba.y) / denom;
 						if (t < 0 || t > 1)
 							continue;
 						edges.push_back(edge);
@@ -974,10 +994,11 @@ namespace ctl {
 				break;
 			}
 
-		//	Search
-			if ( IsLeft(e->Dest()->point,alpha,beta) )
+		// Search
+			PointLineLocation loc = ctl::LocatePointOnLine(e->Dest()->point,alpha,beta, epsilon_);
+			if (loc==PL_LEFT_OF_LINE)
 				e = e->Rprev();
-			else if ( IsRight(e->Dest()->point,alpha,beta) )
+			else if (loc==PL_RIGHT_OF_LINE)
 				e = e->Onext();
 			else 
 			{
@@ -995,7 +1016,7 @@ namespace ctl {
 			//log << "DelaunayTriangulation::GetTouchingVerts() Smart search failed, reverting to brute force." << log.endl;
 
 			vertmap[0] = a;
-			for (int i = 0; i < subdivision_->getNumVerts(); i++)
+			for (int i = 0; i < subdivision_->getMaxVerts(); i++)
 			{
 				Vertex* vert = subdivision_->getVertex(i);
 				if (vert)
@@ -1015,152 +1036,68 @@ namespace ctl {
 		return verts;
 	}
 
+	std::vector<Vertex*> DelaunayTriangulation::GatherVertsLocal(const PointList & polygon, bool constrained, bool working)
+	{
+		Point minP, maxP;
+
+
+		GetBoundingRect(polygon, minP, maxP);
+
+		std::vector<Vertex*> verts;
+		verts.reserve( subdivision_->getMaxVerts() );
+
+		for (int i = 0; i < subdivision_->getMaxVerts(); i++)
+		{
+			Vertex* vert = subdivision_->getVertex(i);
+			if (vert && 
+				((constrained && working) ||
+				 (constrained && cmap_.IsVertexBound(vert)) ||
+				 (working && !cmap_.IsVertexBound(vert))))
+			{
+				if (polygon.empty())
+					verts.push_back(vert);
+				else if (vert->point.x < minP.x ||
+					vert->point.x > maxP.x ||
+					vert->point.y < minP.y ||
+					vert->point.y > maxP.y)
+					continue;
+				if (PointInPolygon(vert->point, polygon, epsilon_))
+					verts.push_back(vert);
+			}
+		}
+
+		return verts;
+	}
+
 	std::vector<Vertex*> DelaunayTriangulation::GatherVerts(PointList polygon)
 	{
 		for (size_t i = 0; i < polygon.size(); i++)
 			polygon[i] = TransformPointToLocal(polygon[i]);
-
-		double minx = DBL_MAX;
-		double miny = DBL_MAX;
-		double maxx = -DBL_MAX;
-		double maxy = -DBL_MAX;
-
-		for (size_t i = 0; i < polygon.size(); i++)
-		{
-			minx = std::min<double>(minx, polygon[i].x);
-			miny = std::min<double>(miny, polygon[i].y);
-			maxx = std::max<double>(maxx, polygon[i].x);
-			maxy = std::max<double>(maxy, polygon[i].y);
+		return GatherVertsLocal(polygon, true, true);
 		}
-
-		std::vector<Vertex*> verts;
-		verts.reserve( subdivision_->getMaxVerts() );
-
-		for (ID i = 0; i < subdivision_->getMaxVerts(); i++)
-		{
-			Vertex* vert = subdivision_->getVertex(i);
-			if (vert)
-			{
-				if (polygon.empty())
-					verts.push_back(vert);
-				else if (vert->point.x < minx ||
-					vert->point.x > maxx ||
-					vert->point.y < miny ||
-					vert->point.y > maxy)
-					continue;
-				if (PointInPolygon(vert->point, polygon, epsilon_))
-					verts.push_back(vert);
-			}
-		}
-
-		return verts;
-	}
 
 	std::vector<Vertex*> DelaunayTriangulation::GatherWorkingVerts(PointList polygon)
-	{
+		{
 		for (size_t i = 0; i < polygon.size(); i++)
 			polygon[i] = TransformPointToLocal(polygon[i]);
-
-		double minx = DBL_MAX;
-		double miny = DBL_MAX;
-		double maxx = -DBL_MAX;
-		double maxy = -DBL_MAX;
-
-		for (size_t i = 0; i < polygon.size(); i++)
-		{
-			minx = std::min<double>(minx, polygon[i].x);
-			miny = std::min<double>(miny, polygon[i].y);
-			maxx = std::max<double>(maxx, polygon[i].x);
-			maxy = std::max<double>(maxy, polygon[i].y);
+		return GatherVertsLocal(polygon, false, true);
 		}
-
-		std::vector<Vertex*> verts;
-		verts.reserve( subdivision_->getMaxVerts() );
-
-		for (ID i = 0; i < subdivision_->getMaxVerts(); i++)
-		{
-			Vertex* vert = subdivision_->getVertex(i);
-			if (vert)
-			{
-				if (cmap_.IsVertexBound(vert))
-					continue;
-				else if (polygon.empty())
-					verts.push_back(vert);
-				else if (vert->point.x < minx ||
-					vert->point.x > maxx ||
-					vert->point.y < miny ||
-					vert->point.y > maxy)
-					continue;
-				if (PointInPolygon(vert->point, polygon, epsilon_))
-					verts.push_back(vert);
-			}
-		}
-
-		return verts;
-	}
 
 	std::vector<Vertex*> DelaunayTriangulation::GatherConstrainedVerts(PointList polygon)
 	{
 		for (size_t i = 0; i < polygon.size(); i++)
 			polygon[i] = TransformPointToLocal(polygon[i]);
-
-		double minx = DBL_MAX;
-		double miny = DBL_MAX;
-		double maxx = -DBL_MAX;
-		double maxy = -DBL_MAX;
-
-		for (size_t i = 0; i < polygon.size(); i++)
-		{
-			minx = std::min<double>(minx, polygon[i].x);
-			miny = std::min<double>(miny, polygon[i].y);
-			maxx = std::max<double>(maxx, polygon[i].x);
-			maxy = std::max<double>(maxy, polygon[i].y);
+		return GatherVertsLocal(polygon, true, false);
 		}
-
-		std::vector<Vertex*> verts;
-		verts.reserve( subdivision_->getMaxVerts() );
-
-		for (ID i = 0; i < subdivision_->getMaxVerts(); i++)
-		{
-			Vertex* vert = subdivision_->getVertex(i);
-			if (vert)
-			{
-				if (!cmap_.IsVertexBound(vert))
-					continue;
-				else if (polygon.empty())
-					verts.push_back(vert);
-				else if (vert->point.x < minx ||
-					vert->point.x > maxx ||
-					vert->point.y < miny ||
-					vert->point.y > maxy)
-					continue;
-				if (PointInPolygon(vert->point, polygon, epsilon_))
-					verts.push_back(vert);
-			}
-		}
-
-		return verts;
-	}
 
 	std::vector<Edge*> DelaunayTriangulation::GatherTriangles(PointList polygon)
 	{
 		for (size_t i = 0; i < polygon.size(); i++)
 			polygon[i] = TransformPointToLocal(polygon[i]);
+		Point minP, maxP;
+		GetBoundingRect(polygon, minP, maxP);
 
-		double minx = DBL_MAX;
-		double miny = DBL_MAX;
-		double maxx = -DBL_MAX;
-		double maxy = -DBL_MAX;
-
-		for (size_t i = 0; i < polygon.size(); i++)
-		{
-			minx = std::min<double>(minx, polygon[i].x);
-			miny = std::min<double>(miny, polygon[i].y);
-			maxx = std::max<double>(maxx, polygon[i].x);
-			maxy = std::max<double>(maxy, polygon[i].y);
-		}
-
-		std::set<Edge*> processedEdges;
+		std::unordered_set<Edge*> processedEdges;
 		std::vector<Edge*> edges;
 
 		edges.reserve(subdivision_->getMaxEdges()*2);
@@ -1181,7 +1118,7 @@ namespace ctl {
 			if (!polygon.empty())
 			{
 				Point center = (p1 + p2 + p3) * (1.0/3.0);
-				if (center.x < minx || center.x > maxx || center.y < miny || center.y > maxy)
+				if (center.x < minP.x || center.x > maxP.x || center.y < minP.y || center.y > maxP.y)
 					continue;
 				if (!PointInPolygon(center, polygon, epsilon_))
 					continue;
@@ -1206,7 +1143,7 @@ namespace ctl {
 
 	bool DelaunayTriangulation::IsRight(Vector vert, Edge* edge)
 	{
-		return IsRight(vert, edge->Org()->point, edge->Dest()->point);
+		return ctl::IsRight(vert, edge->Org()->point, edge->Dest()->point, epsilon_);
 	}
 
 	bool DelaunayTriangulation::IsLeft(Vector vert, Vector a, Vector b)
@@ -1216,33 +1153,19 @@ namespace ctl {
 
 	bool DelaunayTriangulation::IsLeft(Vector vert, Edge* edge)
 	{
-		return IsLeft(vert, edge->Org()->point, edge->Dest()->point);
+		return ctl::IsLeft(vert, edge->Org()->point, edge->Dest()->point, epsilon_);
 	}
 
 	int DelaunayTriangulation::IsOn(Vector vert, Vector p0, Vector p1)
 	{
 		PointLineLocation result = ctl::LocatePointOnLine(vert, p0, p1, epsilon_);
-
-		switch (result)
-		{
-		case PL_BEFORE_LINE:
-			return 0;
-		case PL_BEGINS_LINE:
-			return 1;
-		case PL_ON_LINE:
-			return 2;
-		case PL_ENDS_LINE:
-			return 3;
-		case PL_AFTER_LINE:
-			return 4;
-		default:
-			return -1;
-		}
+		return result <= PL_AFTER_LINE ? result : -1;
 	}
 
 	int DelaunayTriangulation::IsOn(Vector vert, Edge* edge)
 	{
-		return IsOn(vert,edge->Org()->point,edge->Dest()->point);
+		PointLineLocation result = ctl::LocatePointOnLine(vert, edge->Org()->point, edge->Dest()->point, epsilon_);
+		return result <= PL_AFTER_LINE ? result : -1;
 	}
 
 	bool DelaunayTriangulation::InCircle(Vector a, Vector b, Vector c, Vector d)
@@ -1280,23 +1203,21 @@ namespace ctl {
 
 	bool DelaunayTriangulation::IsInside(Point point)
 	{
-		PointList b = boundary_;
-		b.push_back(b.front());
-		return PointInPolygon(point, b, epsilon_);
+		return PointInPolygon(point, boundary_, epsilon_);
 	}
 
-	bool DelaunayTriangulation::IsInside(PointList points)
+	bool DelaunayTriangulation::IsInside(const PointList &points)
 	{
-		for (PointList::iterator it = points.begin(); it != points.end(); ++it)
+		for (PointList::const_iterator it = points.begin(); it != points.end(); ++it)
 		{
 			if (!IsInside(*it)) return false;
 		}
 		return true;
 	}
 
-	bool DelaunayTriangulation::Touches(PointList points)
+	bool DelaunayTriangulation::Touches(const PointList &points)
 	{
-		for (PointList::iterator it = points.begin(); it != points.end(); ++it)
+		for (PointList::const_iterator it = points.begin(); it != points.end(); ++it)
 		{
 			if (IsInside(*it)) return true;
 		}
@@ -1351,24 +1272,21 @@ namespace ctl {
 	Edge* DelaunayTriangulation::GetLeftEdge(Vertex* a, Point p)
 	{
 		Edge* edge = a->getEdges();
-
+		Edge* startEdge = edge;
 		int iteration = 0;
 		int iteration_limit = GetNumEdges();
 
-		if(IsOn(p,edge) != -1)
-		{
-			Vector u = p - edge->Org()->point;
-			Vector v = edge->Dest()->point - edge->Org()->point;
-
-			if (u.dot(v) < 0)
-				edge = edge->Onext();
-		}
+		// We need to return an edge so that the point is to the right of the edge.
+		// If the first point is to the right, search the previous edges.
+		// If the first points is to the left, search the next edges
+		// Note that we check for !IsLeft() and !IsRight() so that the function returns an edge 
 
 		if(IsRight(p, edge))
 		{
-			while(IsRight(p, edge->Oprev()))
+			while(!IsLeft(p, edge->Oprev()))
 			{
-				if (iteration++ > iteration_limit)
+				edge = edge->Oprev();
+				if (iteration++ > iteration_limit || edge==startEdge)
 				{
 					//ccl::ObjLog log;
 					//log << ccl::LERR << "DelaunayTriangulation::GetLeftEdge() No 'left edge' found, this indicates graph corruption." << log.endl;
@@ -1389,14 +1307,14 @@ namespace ctl {
 
 
 				}
-				edge = edge->Oprev();
 			}
 		}
 		else
 		{
-			while(IsLeft(p, edge->Onext()))
+			while(!IsRight(p, edge->Onext()))
 			{
-				if (iteration++ > iteration_limit)
+				edge = edge->Onext();
+				if (iteration++ > iteration_limit || edge==startEdge)
 				{
 #ifdef CTL_DEBUG
 					if (GlobalCTLDebugEnabled)
@@ -1413,7 +1331,6 @@ namespace ctl {
 					//log << ccl::LERR << "DelaunayTriangulation::GetLeftEdge() No 'left edge' found, this indicates graph corruption." << log.endl;
 					return edge;
 				}
-				edge = edge->Onext();
 			}
 			edge = edge->Onext();
 		}
@@ -1488,18 +1405,18 @@ namespace ctl {
 				break;
 			}
 
-			if (IsRight(p,edge))
+			PointLineLocation result = ctl::LocatePointOnLine(p, edge->Org()->point, edge->Dest()->point, epsilon_);
+			if (result==PL_RIGHT_OF_LINE)
 			{
 				edge = edge->Sym();
 				continue;
 			}
 
-			int result = IsOn(p,edge);
-			if (result == 1)
+			if (result == PL_BEGINS_LINE)
 				return LocationResult(edge,LR_VERTEX);
-			else if (result == 2)
+			else if (result == PL_ON_LINE)
 				return LocationResult(edge,LR_EDGE);
-			else if (result == 3)
+			else if (result == PL_ENDS_LINE)
 				return LocationResult(edge->Sym(),LR_VERTEX);
 			else if (!IsRight(p,edge->Onext()))
 			{
@@ -1510,7 +1427,7 @@ namespace ctl {
 				else
 					edge = edge->Onext();
 			}
-			else if (!IsRight(p,edge->Dprev()))	
+			else if (!IsRight(p,edge->Dprev()))    
 				edge = edge->Dprev();
 			else
 				return LocationResult(edge,LR_FACE);
@@ -1526,11 +1443,11 @@ namespace ctl {
 				if (edge)
 				{
 					int result = IsOn(p,edge);
-					if (result == 1)
+					if (result == PL_BEGINS_LINE)
 						return LocationResult(edge,LR_VERTEX);
-					else if (result == 2)
+					else if (result == PL_ON_LINE)
 						return LocationResult(edge,LR_EDGE);
-					else if (result == 3)
+					else if (result == PL_ENDS_LINE)
 						return LocationResult(edge->Sym(),LR_VERTEX);
 					else if (IsLeft(p, edge) && IsLeft(p, edge->Lnext()) && IsLeft(p, edge->Lprev()))
 						return LocationResult(edge,LR_FACE);
@@ -1539,11 +1456,11 @@ namespace ctl {
 				{
 					edge = edge->Sym();
 					int result = IsOn(p,edge);
-					if (result == 1)
+					if (result == PL_BEGINS_LINE)
 						return LocationResult(edge,LR_VERTEX);
-					else if (result == 2)
+					else if (result == PL_ON_LINE)
 						return LocationResult(edge,LR_EDGE);
-					else if (result == 3)
+					else if (result == PL_ENDS_LINE)
 						return LocationResult(edge->Sym(),LR_VERTEX);
 					else if (IsLeft(p, edge) && IsLeft(p, edge->Lnext()) && IsLeft(p, edge->Lprev()))
 						return LocationResult(edge,LR_FACE);
@@ -1594,7 +1511,7 @@ namespace ctl {
 	{
 		return bsp->findSnapVertex(p);
 		//TODO - use BSP
-		for (size_t i = 0, n = subdivision_->getMaxVerts(); i < n; ++i)
+		for (int i = 0, n = subdivision_->getMaxVerts(); i < n; ++i)
 		{
 			Vertex* v = subdivision_->getVertex(i);
 			if (v && (v->point - p).length2D2() < 0.01)
@@ -1606,7 +1523,7 @@ namespace ctl {
 	Vertex* DelaunayTriangulation::SnapPointToEdge(const Point& p)
 	{
 		//TODO - use BSP
-		for (size_t i = 0, n = subdivision_->getMaxEdges(); i < n; ++i)
+		for (int i = 0, n = subdivision_->getMaxEdges(); i < n; ++i)
 		{
 			Edge* e = subdivision_->getEdge(i);
 			if (e && cmap_.IsEdgeBound(e) && (LocatePointOnLine(p, e->Org()->point, e->Dest()->point, 0.01) == PL_ON_LINE))
@@ -1627,7 +1544,11 @@ namespace ctl {
 		else if (location.getType() == LR_FACE)
 			result = InsertPointInFace(p,location.getEdge());
 		else if (location.getType() == LR_VERTEX)
+		{
 			result = location.getEdge()->Org();
+			result->point.z = p.z; // Need to set the proper Z
+			return result; // Do not add to bsp -already included
+		}
 		if(result)
 			bsp->addVertex(result);
 		return result;
@@ -1898,21 +1819,19 @@ namespace ctl {
 		std::vector<Edge*>		edges;
 		std::vector<Vertex*>	verts;
 
-	//	Add intersection Points to constrained edges.
-		edges = GetCrossingEdges(a,b);
+	// Add intersection Points to constrained edges.
+		edges = GetCrossingEdges(a,b,true,false);
 		for (std::vector<Edge*>::iterator it = edges.begin(); it != edges.end(); ++it)
 		{
-			if (cmap_.IsEdgeBound(*it))
-				InsertPointInEdge(Intersection(*it,a->point,b->point),*it);
+			InsertPointInEdge(Intersection(*it,a->point,b->point),*it);
 		}
 		//edges.clear();
 
-	//	Remove all non-constrained edges. Must research for crossing edges because of changes from inserting new points
-		edges = GetCrossingEdges(a,b);
+	// Remove all non-constrained edges. Must research for crossing edges because of changes from inserting new points
+		edges = GetCrossingEdges(a,b,false,true);
 		for (std::vector<Edge*>::iterator it = edges.begin(); it != edges.end(); ++it)
 		{
-			if (!cmap_.IsEdgeBound(*it)) 
-				RemoveEdge(*it);
+			RemoveEdge(*it);
 		}
 		//edges.clear();
 
@@ -2103,21 +2022,9 @@ namespace ctl {
 			delete maxChild;
 	}
 
-	DelaunayBSP::DelaunayBSP(PointList boundary) : depth(0), vertical(true), minChild(NULL), maxChild(NULL)
+	DelaunayBSP::DelaunayBSP(const PointList &boundary) : depth(0), vertical(true), minChild(NULL), maxChild(NULL)
 	{
-		double minX = DBL_MAX;
-		double maxX = -DBL_MAX;
-		double minY = DBL_MAX;
-		double maxY = -DBL_MAX;
-		for(size_t i = 0, c = boundary.size(); i < c; ++i)
-		{
-			minX = std::min(minX, boundary[i].x);
-			maxX = std::max(maxX, boundary[i].x);
-			minY = std::min(minY, boundary[i].y);
-			maxY = std::max(maxY, boundary[i].y);
-		}
-		minPoint = Point(minX, minY);
-		maxPoint = Point(maxX, maxY);
+		GetBoundingRect(boundary, minPoint, maxPoint);
 	}
 
 	DelaunayBSP::DelaunayBSP(const Point &minPoint, const Point &maxPoint, size_t depth, bool vertical) : minPoint(minPoint), maxPoint(maxPoint), depth(depth + 1), vertical(vertical), minChild(NULL), maxChild(NULL)

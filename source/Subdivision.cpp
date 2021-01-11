@@ -23,34 +23,32 @@ THE SOFTWARE.
 
 namespace ctl {
 
-//!	Allocate more memory for Vertices
+//!    Allocate more memory for Vertices
 	void Subdivision::allocVerts(void)
 	{
 		int start = int(verts.size());
 		Block<Vertex>* _verts = new Block<Vertex>(resizeIncriment);
 		verts.PushBlock(_verts);
+		vertFlags.resize(start + resizeIncriment, false);
 		
-		for (unsigned int i = 0; i < _verts->size; i++)
-		{
-			vertFlags.push_back(false);
+		for (unsigned int i = 0; i < resizeIncriment; i++)
 			_verts->data[i].id = start + i;
-		}
 	}
 
-//!	Allocate more memory for Edges
+//!    Allocate more memory for Edges
 	void Subdivision::allocEdges(void)
 	{
-		int start = getMaxEdges();
+		int start = int(edges.size()/4);
 		Block<Edge>* _edges = new Block<Edge>(4*resizeIncriment);
 		edges.PushBlock(_edges);
+		edgeFlags.resize(start + resizeIncriment, false);
 
 		for (size_t i = 0; i < resizeIncriment; i++)
 		{
-			edgeFlags.push_back(false);
-			_edges->data[ 4*i + 0 ].id = start + i;
-			_edges->data[ 4*i + 1 ].id = start + i;
-			_edges->data[ 4*i + 2 ].id = start + i;
-			_edges->data[ 4*i + 3 ].id = start + i;
+			_edges->data[ 4*i + 0 ].id = static_cast<ID>(start + i);
+			_edges->data[ 4*i + 1 ].id = static_cast<ID>(start + i);
+			_edges->data[ 4*i + 2 ].id = static_cast<ID>(start + i);
+			_edges->data[ 4*i + 3 ].id = static_cast<ID>(start + i);
 			_edges->data[ 4*i + 0 ].num = 0;
 			_edges->data[ 4*i + 1 ].num = 1;
 			_edges->data[ 4*i + 2 ].num = 2;
@@ -67,7 +65,7 @@ namespace ctl {
 
 	int Subdivision::getMaxVerts(void) const
 	{
-		return int(vertFlags.size());
+		return vertIDGen.peekNextID();
 	}
 
 	int Subdivision::getNumVerts(void) const {
@@ -98,7 +96,7 @@ namespace ctl {
 	Vertex* Subdivision::CreateVertex(Point point)
 	{
 		ID id = vertIDGen.getID();
-		if (int(id) >= getMaxVerts())
+		if (int(id) >= verts.size())
 			allocVerts();
 		vertFlags[id] = true;
 		Vertex* vert = verts[id];
@@ -127,7 +125,7 @@ namespace ctl {
 	}
 
 	int Subdivision::getMaxEdges(void) const {
-		return int(edgeFlags.size());
+		return edgeIDGen.peekNextID();
 	}
 
 	int Subdivision::getNumEdges(void) const {
@@ -158,7 +156,7 @@ namespace ctl {
 	Edge* Subdivision::CreateEdge(Vertex* a, Vertex* b)
 	{
 		ID id = edgeIDGen.getID();
-		if (int(id) >= getMaxEdges())
+		if (int(4*id) >= edges.size())
 			allocEdges();
 		edgeFlags[id] = true;
 		Edge* e0 = edges[ 4*id + 0 ];
@@ -202,17 +200,17 @@ namespace ctl {
 	void Subdivision::Splice(Edge* a, Edge* b)
 	{
 		Edge* alpha = a->Onext()->Rot();
-		Edge* beta	= b->Onext()->Rot();
+		Edge* beta    = b->Onext()->Rot();
 
 		Edge* temp1 = b->Onext();
 		Edge* temp2 = a->Onext();
 		Edge* temp3 = beta->Onext();
 		Edge* temp4 = alpha->Onext();
 
-		a->next		= temp1;
-		b->next		= temp2;
+		a->next        = temp1;
+		b->next        = temp2;
 		alpha->next = temp3;
-		beta->next	= temp4;
+		beta->next    = temp4;
 	}
 
 }
